@@ -1,0 +1,15 @@
+services:
+  db:
+    image: postgres:14
+    container_name: celebot_db
+    environment:
+      POSTGRES_USER: celebot_admin
+      POSTGRES_PASSWORD: meow-password
+      POSTGRES_DB: celebrity_db
+    volumes:
+      - celebot_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"      # <-- порт хоста 5433 → контейнер 5432
+
+volumes:
+  celebot_data:
