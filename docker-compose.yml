@@ -1,4 +1,12 @@
 services:
+  bot:
+    build: .
+    env_file: .env
+    depends_on:
+      - db
+    command: >
+        sh -c "python scripts/import_csv.py && python bot.py"
+
   db:
     image: postgres:14
     container_name: celebot_db
@@ -7,9 +15,8 @@ services:
       POSTGRES_PASSWORD: meow-password
       POSTGRES_DB: celebrity_db
     volumes:
-      - celebot_data:/var/lib/postgresql/data
+      - data:/var/lib/postgresql/data
     ports:
-      - "5433:5432"      # <-- порт хоста 5433 → контейнер 5432
-
+      - "5433:5432"
 volumes:
-  celebot_data:
+    data:

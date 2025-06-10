@@ -261,7 +261,7 @@ async def back_handler(call: types.CallbackQuery, state: FSMContext):
         kb = InlineKeyboardBuilder()
         for cat in categories:
             kb.button(text=cat.title(), callback_data=f"cat:{cat}")
-        kb.button(text="🔙 Назад", callback_data="back:method")
+        kb.button(text="🔙 Назад", callback_data="back:cat")
         kb.adjust(2)
 
         await state.set_state(SearchMenu.choosing_cat)
