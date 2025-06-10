@@ -5,7 +5,9 @@ services:
     depends_on:
       - db
     command: >
-        sh -c "python scripts/import_csv.py && python bot.py"
+        sh -c "alembic upgrade head && python scripts/import_csv.py && python bot.py"
+    environment:
+      DATABASE_URL: postgresql://celebot_admin:meow-password@db:5432/celebrity_db
 
   db:
     image: postgres:14

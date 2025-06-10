@@ -30,4 +30,6 @@ telegram==0.0.1
 typing-inspection==0.4.1
 typing_extensions==4.14.0
 tzdata==2025.2
+unicode==2.9
+Unidecode==1.4.0
 yarl==1.20.0
