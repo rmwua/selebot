@@ -23,7 +23,11 @@ def categories_keyboard():
     categories = sorted(set(category_synonyms.values()))
     kb = InlineKeyboardBuilder()
     for cat in categories:
-        kb.button(text=cat.title(), callback_data=f"cat:{cat}")
+        if cat.strip().lower() == "жкт":
+            label = "ЖКТ"
+        else:
+            label = " ".join(word.capitalize() for word in cat.split())
+        kb.button(text=label, callback_data=f"cat:{cat}")
     kb.button(text="🔙 Назад", callback_data="back:geo")
     kb.adjust(2)
 

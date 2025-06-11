@@ -127,8 +127,9 @@ async def handle_request(name_input: str, category: str, geo: str, message: type
     if matched:
         name = matched['name']
         status = matched['status']
-        category = matched['category']
         geo = matched['geo']
+        raw_cat = matched['category']
+        category = raw_cat.strip().lower()
         display_category = 'ЖКТ' if category.lower() == 'жкт' else category.title()
 
         emoji = "✅" if matched['status'].lower() == 'согласована' else "⛔"
@@ -247,7 +248,7 @@ async def back_handler(call: types.CallbackQuery, state: FSMContext):
 
         await state.set_state(SearchMenu.choosing_cat)
         return await call.message.edit_text(
-            f"Регион «{geo}». Выберите категорию:",
+            f"Регион «{geo.title()}». Выберите категорию:",
             reply_markup=cat_kb.as_markup()
         )
 
