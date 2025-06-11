@@ -4,8 +4,12 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 import config, db
+from keyboards import new_search_button, geo_keyboard, categories_keyboard
 
-from synonyms import category_synonyms, geo_synonyms, geo_flags
+from synonyms import category_synonyms, geo_synonyms
+
+
+logger = config.logger
 
 
 class RequestCelebrity(StatesGroup):
@@ -28,21 +32,24 @@ async def cmd_start(message: types.Message, state: FSMContext):
     await state.clear()
     await state.set_state(SearchMenu.choosing_method)
     await message.answer("Как вы хотите искать?", reply_markup=kb.as_markup())
+    await db.add_subscriber(message.chat.id)
 
 
 async def mode_chosen(call: types.CallbackQuery, state: FSMContext):
     mode = call.data.split(":", 1)[1]
-    if mode == "menu":
-        kb = InlineKeyboardBuilder()
-        for key, label in geo_flags.items():
-            kb.button(text=label, callback_data=f"geo:{key}")
-        kb.adjust(3)
+    back_button = InlineKeyboardBuilder()
+    back_button.button(text="🔙 Назад", callback_data="back:method")
+    back_button.adjust(1)
 
+    if mode == "menu":
+        geo_kb = geo_keyboard()
         await state.set_state(SearchMenu.choosing_geo)
-        await call.message.edit_text("Выберите регион:", reply_markup=kb.as_markup())
+        await call.message.edit_text("Выберите регион:", reply_markup=geo_kb.as_markup())
     else:
         await state.set_state(SearchMenu.manual_entry)
-        await call.message.edit_text("Введите через запятую: Имя, Категория, Гео")
+        await call.message.edit_text("Введите через запятую: Имя, Категория, Гео", reply_markup=back_button.as_markup())
+
+        await state.update_data(prompt_message_id=call.message.message_id)
     await call.answer()
 
 
@@ -51,18 +58,12 @@ async def geo_chosen(call: types.CallbackQuery, state: FSMContext):
     selected_geo = geo_synonyms[geo_key]
     await state.update_data(geo=selected_geo)
 
-    categories = sorted(set(category_synonyms.values()))
-
-    kb = InlineKeyboardBuilder()
-    for cat in categories:
-        kb.button(text=cat.title(), callback_data=f"cat:{cat}")
-    kb.button(text="🔙 Назад", callback_data="back:geo")
-    kb.adjust(2)
+    cat_kb = categories_keyboard()
 
     await state.set_state(SearchMenu.choosing_cat)
     await call.message.edit_text(
         f"Вы выбрали регион «{selected_geo}». Теперь выберите категорию:",
-        reply_markup=kb.as_markup()
+        reply_markup=cat_kb.as_markup()
     )
     await call.answer()
 
@@ -80,6 +81,8 @@ async def cat_chosen(call: types.CallbackQuery, state: FSMContext):
         f"Вы выбрали категорию «{cat_key.title()}». Введите теперь имя знаменитости:",
         reply_markup=kb.as_markup()
     )
+    await state.update_data(prompt_message_id=call.message.message_id)
+    await state.set_state(SearchMenu.entering_name)
     await call.answer()
 
 
@@ -89,59 +92,10 @@ async def name_entered(message: types.Message, state: FSMContext):
     geo  = data['geo']
     cat  = data['category']
 
-    celeb = await db.find_matching_celebrity(name_input, cat, geo)
-    if celeb:
-        kb = InlineKeyboardBuilder()
-        kb.button(text="🔄 Новый поиск", callback_data="new_search")
-        keyboard = kb.as_markup()
-
-        await message.answer(
-            f"Селеба: {celeb['name']}\n"
-            f"Статус: {celeb['status']}\n"
-            f"Категория: {celeb['category']}\n"
-            f"Гео: {celeb['geo']}",
-            reply_markup=keyboard
-        )
-    else:
-        request_id = await db.add_pending_request(
-            message.from_user.id,
-            message.chat.id,
-            message.message_id,
-            name_input,
-            cat,
-            geo
-        )
-
-        builder = InlineKeyboardBuilder()
-        builder.button(text="✅ Одобрить", callback_data=f"approve:{request_id}")
-        builder.button(text="⛔ Забанить", callback_data=f"ban:{request_id}")
-        builder.adjust(2)
-        keyboard = builder.as_markup()
-
-        await message.answer("Ваш запрос в обработке, ожидайте ответа модератора…")
-
-        await message.bot.send_message(
-            config.MODERATOR_ID,
-            (
-                f"Новая заявка (через меню):\n"
-                f"Имя: {name_input}\n"
-                f"Категория: {cat}\n"
-                f"Гео: {geo}\n"
-                f"Request ID: {request_id}"
-            ),
-            reply_markup=keyboard
-        )
-
-    await state.clear()
-
+    await handle_request(name_input, cat, geo, message, state)
 
 
 async def manual_handler(message: types.Message, state: FSMContext):
-    await handle_request(message, state)
-    await state.clear()
-
-
-async def handle_request(message: types.Message, state: FSMContext):
     text = message.text.strip()
     parts = [p.strip() for p in text.split(",")]
     if len(parts) < 3:
@@ -153,24 +107,34 @@ async def handle_request(message: types.Message, state: FSMContext):
 
     category = category_synonyms.get(cat_input)
     geo = geo_synonyms.get(geo_input)
+    new_search_b = new_search_button()
 
     if category is None:
-        return await message.answer("Знаменитость не согласована. Данной категории пока нет.")
+        return await message.answer("Знаменитость не согласована. Данной категории пока нет.", reply_markup=new_search_b.as_markup())
     if geo is None:
-        return await message.answer("Знаменитость не согласована. Данного гео пока нет.")
+        return await message.answer("Знаменитость не согласована. Данного гео пока нет.", reply_markup=new_search_b.as_markup())
 
-    matched = await db.find_matching_celebrity(name_input, category, geo)
+    await handle_request(name_input, category, geo, message, state)
+
+
+async def handle_request(name_input: str, category: str, geo: str, message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    prompt_id = data.get('prompt_message_id')
+    chat_id = message.chat.id
+    matched = await db.find_celebrity(name_input, category, geo)
+    new_search_b = new_search_button()
+
     if matched:
-        kb = InlineKeyboardBuilder()
-        kb.button(text="🔄 Новый поиск", callback_data="new_search")
-        keyboard = kb.as_markup()
+        if matched['category'].lower() == 'жкт':
+            matched['category'] = 'ЖКТ'
+        emoji = "✅" if matched['status'].lower() == 'согласована' else "⛔"
 
         await message.answer(
-            f"Селеба: {matched['name']}\n"
-            f"Статус: {matched['status']}\n"
-            f"Категория: {matched['category']}\n"
-            f"Гео: {matched['geo']}",
-            reply_markup=keyboard
+            f"Селеба: {matched['name'].title()}\n"
+            f"Статус: {matched['status'].title()}{emoji}\n"
+            f"Категория: {matched['category'].title()}\n"
+            f"Гео: {matched['geo'].title()}",
+            reply_markup=new_search_b.as_markup()
         )
     else:
         request_id = await db.add_pending_request(
@@ -179,7 +143,8 @@ async def handle_request(message: types.Message, state: FSMContext):
             message.message_id,
             name_input,
             category,
-            geo
+            geo,
+            prompt_id
         )
 
         builder = InlineKeyboardBuilder()
@@ -188,45 +153,64 @@ async def handle_request(message: types.Message, state: FSMContext):
         builder.adjust(2)
         keyboard = builder.as_markup()
 
-        await message.answer("Ваш запрос в обработке, ожидайте ответа модератора…")
+        text = f"Ваш запрос в обработке, ожидайте ответа модератора. Номер заявки: {request_id}"
+
+        await message.bot.edit_message_text(
+            text=text,
+            chat_id=chat_id,
+            message_id=prompt_id,
+            reply_markup=new_search_b.as_markup(),
+        )
+
         await message.bot.send_message(
             config.MODERATOR_ID,
             f"Новая заявка:\nИмя: {name_input}\nКатегория: {category}\nГео: {geo}\nRequest ID: {request_id}",
             reply_markup=keyboard
         )
         await state.clear()
-        return await cmd_start(message, state)
 
 
 async def callback_handler(call: types.CallbackQuery):
     action, req_id = call.data.split(":", 1)
     is_approve = (action == "approve")
+    emoji = "✅" if is_approve else "⛔"
 
     pending = await db.pop_pending_request(int(req_id))
     if not pending:
         return await call.answer("Заявка не найдена или уже обработана", show_alert=True)
+
+    await call.bot.delete_message(
+        chat_id=pending["chat_id"],
+        message_id=pending["bot_message_id"]
+    )
 
     name     = pending["celebrity_name"]
     category = pending["category"]
     geo      = pending["geo"]
     chat_id  = pending["chat_id"]
     msg_id   = pending["message_id"]
-
-    status = "Согласована" if is_approve else "Черный список"
-
-    await db.insert_celebrity(name, category, geo, status)
+    status = "Согласована" if is_approve else "Нельзя Использовать"
+    new_search_b = new_search_button()
 
     await call.bot.send_message(
-        chat_id,
-        f"Статус для `{name}` — *{status}*",
+        chat_id=chat_id,
+        text=(
+            f"Статус для `{name}` — *{status}{emoji}*\n"
+            f"Категория: {category.title()}\n"
+            f"Гео: {geo.title()}"
+        ),
         parse_mode="Markdown",
-        reply_to_message_id=msg_id
+        reply_to_message_id=msg_id,
+        reply_markup=new_search_b.as_markup()
     )
 
     await call.bot.send_message(
         config.MODERATOR_ID,
         f"Заявка #{req_id} на «{name}» обработана: {status}"
     )
+
+    name, category, geo, status = name.lower(), category.lower(), geo.lower(), status.lower()
+    await db.insert_celebrity(name, category, geo, status)
 
     await call.answer("Готово", show_alert=False)
     await call.message.delete()
@@ -239,35 +223,28 @@ async def back_handler(call: types.CallbackQuery, state: FSMContext):
     if where == "method":
         # возврат в стартовое меню
         await state.clear()
+        await call.message.delete()
         return await cmd_start(call.message, state)
 
     if where == "geo":
         # возврат к выбору регионов
-        kb = InlineKeyboardBuilder()
-        for key, label in geo_flags.items():
-            kb.button(text=label, callback_data=f"geo:{key}")
-        kb.adjust(3)
+        geo_kb = geo_keyboard()
         await state.set_state(SearchMenu.choosing_geo)
         return await call.message.edit_text(
             "Выберите регион:",
-            reply_markup=kb.as_markup()
+            reply_markup=geo_kb.as_markup()
         )
 
     if where == "cat":
         # возврат к выбору категорий (после того как ввели имя)
         data = await state.get_data()
         geo = data.get("geo")
-        categories = sorted(set(category_synonyms.values()))
-        kb = InlineKeyboardBuilder()
-        for cat in categories:
-            kb.button(text=cat.title(), callback_data=f"cat:{cat}")
-        kb.button(text="🔙 Назад", callback_data="back:cat")
-        kb.adjust(2)
+        cat_kb = categories_keyboard()
 
         await state.set_state(SearchMenu.choosing_cat)
         return await call.message.edit_text(
             f"Регион «{geo}». Выберите категорию:",
-            reply_markup=kb.as_markup()
+            reply_markup=cat_kb.as_markup()
         )
 
 

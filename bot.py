@@ -1,15 +1,13 @@
 import asyncio
-
+from aiogram.fsm.context import FSMContext
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 import config
 import db
-
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, StateFilter
 from handlers import (
     cmd_start,
-    handle_request,
     callback_handler,
-    RequestCelebrity,
     mode_chosen,
     geo_chosen,
     cat_chosen,
@@ -28,11 +26,6 @@ async def main():
     dp.message.register(
         cmd_start,
         Command("start"),
-    )
-
-    dp.message.register(
-        handle_request,
-        StateFilter(RequestCelebrity.waiting_for_info),
     )
 
     dp.callback_query.register(
@@ -78,7 +71,35 @@ async def main():
         F.data == "new_search"
     )
 
-    await dp.start_polling(bot)
+    async def on_startup():
+        subs = await db.get_all_subscribers()
+        start_kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+                [InlineKeyboardButton(text="🚀 START", callback_data="start:from_broadcast")]
+            ],
+        )
+        for chat_id in subs:
+            try:
+                await bot.send_message(
+                    chat_id,
+                    "🚀 Бот обновлён до новой версии! Всё готово — нажмите START, чтобы продолжить.",
+                    reply_markup=start_kb
+                )
+            except Exception:
+                pass
+
+    async def start_from_broadcast(call: CallbackQuery, state: FSMContext):
+        await call.answer()
+        await call.message.delete()
+        await cmd_start(call.message, state)
+
+    dp.startup.register(on_startup)
+    dp.callback_query.register(
+        start_from_broadcast,
+        F.data == "start:from_broadcast"
+    )
+
+    await dp.start_polling(bot, skip_updates=True, on_startup=on_startup)
 
 
 if __name__ == "__main__":

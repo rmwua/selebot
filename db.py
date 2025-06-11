@@ -1,128 +1,128 @@
 import re
-import config
-from asyncpg import create_pool
-from rapidfuzz import process, fuzz
+from typing import Optional
+
 from unidecode import unidecode
 
-pool = None
+import config
+from asyncpg import create_pool, Pool
 
-def sanitize(text: str) -> str:
+pool: Optional[Pool] = None
+
+
+def sanitize_cyr(text: str) -> str:
+    # для normalized_name: убираем пунктуацию, оставляем кириллицу
     return re.sub(r"[^\w\s]", "", text, flags=re.UNICODE).strip().lower()
+
+def sanitize_ascii(text: str) -> str:
+    # для ascii_name: транслитерируем, потом очищаем
+    return re.sub(r"[^\w\s]", "", unidecode(text), flags=re.UNICODE).strip().lower()
 
 
 async def init_db():
     global pool
-    pool = await create_pool(dsn=config.DATABASE_URL, min_size=1, max_size=10)
+    if pool is None:
+        pool = await create_pool(dsn=config.DATABASE_URL, min_size=1, max_size=10)
 
 
-async def get_celeb_by_name(name: str):
-    name_clean = name.strip().lower()
-    is_ascii   = name_clean.isascii()
+async def find_celebrity(name: str, category: str, geo: str) -> dict | None:
+    await init_db()
+    assert pool is not None
 
-    # 1) Загружаем всё в память
+    # два “нормализованных” варианта ввода
+    cyr = sanitize_cyr(name)
+    asc = sanitize_ascii(name)
+    cat = category.lower()
+    loc = geo.lower()
+
     async with pool.acquire() as conn:
-        rows = await conn.fetch("SELECT name, category, geo, status FROM celebrities")
-    celebs = [dict(r) for r in rows]
-
-    if is_ascii:
-        # транслитерация и тоже чистим
-        translits = [
-            sanitize(unidecode(c["name"]))
-            for c in celebs
-        ]
-
-        # 1) Exact match по транслиту
-        for i, t in enumerate(translits):
-            if t == name_clean:
-                return celebs[i]
-
-        # 2) Substring (подстрока) по транслиту
-        for i, t in enumerate(translits):
-            if name_clean in t:
-                return celebs[i]
-
-        # 3) Fuzzy-partial
-        best = process.extractOne(
-            name_clean,
-            translits,
-            scorer=fuzz.partial_ratio,
-            score_cutoff=config.FUZY_THRESHOLD
+        # 1) exact
+        row = await conn.fetchrow(
+            """
+            SELECT name, category, geo, status
+              FROM celebrities
+             WHERE lower(category) = $3
+               AND lower(geo)      = $4
+               AND (
+                    normalized_name = $1
+                 OR ascii_name      = $2
+               )
+            """,
+            cyr, asc, cat, loc
         )
-        if best:
-            _, _, idx = best
-            return celebs[idx]
+        if row:
+            return dict(row)
 
-        # 4) Fuzzy token_sort (ещё один ракурс)
-        best = process.extractOne(
-            name_clean,
-            translits,
-            scorer=fuzz.token_sort_ratio,
-            score_cutoff=config.FUZY_THRESHOLD
+        # 2) substring
+        row = await conn.fetchrow(
+            """
+            SELECT name, category, geo, status
+              FROM celebrities
+             WHERE lower(category) = $3
+               AND lower(geo)      = $4
+               AND (
+                    normalized_name LIKE '%' || $1 || '%'
+                 OR ascii_name      LIKE '%' || $2 || '%'
+               )
+             LIMIT 1
+            """,
+            cyr, asc, cat, loc
         )
-        if best:
-            _, _, idx = best
-            return celebs[idx]
+        if row:
+            return dict(row)
 
-        # кириллическая ветка
-
-        # 5) Exact по оригинальному имени
-    for c in celebs:
-        if sanitize(c["name"]) == name_clean:
-            return c
-
-        # 6) Substring по оригиналу
-    for c in celebs:
-        if name_clean in sanitize(c["name"]):
-            return c
-
-        # 7) Fuzzy-partial по оригиналу
-    names = [sanitize(c["name"]) for c in celebs]
-    best = process.extractOne(
-        name_clean,
-        names,
-        scorer=fuzz.partial_ratio,
-        score_cutoff=config.FUZY_THRESHOLD
-    )
-    if best:
-        _, _, idx = best
-        return celebs[idx]
-
-    # 8) Fuzzy token_sort по оригиналу
-    best = process.extractOne(
-        name_clean,
-        names,
-        scorer=fuzz.token_sort_ratio,
-        score_cutoff=config.FUZY_THRESHOLD
-    )
-    if best:
-        _, _, idx = best
-        return celebs[idx]
-
-    return None
+        # 3) fuzzy via pg_trgm
+        row = await conn.fetchrow(
+            """
+            SELECT name, category, geo, status
+              FROM celebrities
+             WHERE lower(category) = $3
+               AND lower(geo)      = $4
+               AND (
+                    normalized_name % $1
+                 OR ascii_name      % $2
+               )
+             ORDER BY
+               GREATEST(
+                 similarity(normalized_name, $1),
+                 similarity(ascii_name,      $2)
+               ) DESC
+             LIMIT 1
+            """,
+            cyr, asc, cat, loc
+        )
+        return dict(row) if row else None
 
 
-async def find_matching_celebrity(name:str, category: str, geo: str):
-    celeb = await get_celeb_by_name(name)
-    if celeb and celeb["category"] == category.lower() and celeb["geo"] == geo.lower():
-        return celeb
-    return None
-
-
-async def add_pending_request(user_id, chat_id, message_id, celebrity_name, category, geo):
+async def add_pending_request(
+    user_id: int,
+    chat_id: int,
+    message_id: int,
+    celebrity_name: str,
+    category: str,
+    geo: str,
+    bot_message_id: int
+) -> int:
+    await init_db()
+    assert pool is not None
     async with pool.acquire() as conn:
         return await conn.fetchval(
             """
             INSERT INTO pending_requests(
               user_id, chat_id, message_id,
-              celebrity_name, category, geo
-            ) VALUES($1,$2,$3,$4,$5,$6)
+              celebrity_name, category, geo,
+              bot_message_id
+            ) VALUES($1,$2,$3,$4,$5,$6,$7)
             RETURNING id;
             """,
-            user_id, chat_id, message_id, celebrity_name, category, geo
+            user_id, chat_id, message_id,
+            celebrity_name, category, geo,
+            bot_message_id
         )
 
 
-async def pop_pending_request(request_id):
+async def pop_pending_request(request_id: int) -> dict | None:
+    await init_db()
+    assert pool is not None
     async with pool.acquire() as conn:
         return await conn.fetchrow(
             """
@@ -134,31 +134,56 @@ async def pop_pending_request(request_id):
                message_id,
                celebrity_name,
                category,
-               geo;
+               geo,
+               bot_message_id;
             """,
             request_id
         )
 
 
-async def insert_celebrity(name: str, category: str, geo: str, status: str):
+async def insert_celebrity(
+    name: str,
+    category: str,
+    geo: str,
+    status: str
+) -> None:
+    """
+    Вставляет (или обновляет) селебу, заполняя сразу normalized_name и ascii_name.
+    """
+    await init_db()
+    assert pool is not None
+
+    # вычисляем ascii-транслит на Python
+    ascii_val = unidecode(name).lower()
+
     async with pool.acquire() as conn:
         await conn.execute(
             """
-            INSERT INTO celebrities(name, category, geo, status)
-            VALUES($1, $2, $3, $4)
-            ON CONFLICT (name, category, geo)
-            DO UPDATE
-               SET status = EXCLUDED.status
+            INSERT INTO celebrities
+              (name, normalized_name, ascii_name, category, geo, status)
+            VALUES
+              (
+                $1,
+                lower(unaccent($1)),  -- normalized_name
+                $2,                   -- ascii_name
+                $3, $4, $5
+              )
+            ON CONFLICT (name, category, geo) DO UPDATE
+              SET status          = EXCLUDED.status,
+                  normalized_name = EXCLUDED.normalized_name,
+                  ascii_name      = EXCLUDED.ascii_name;
             """,
-            name, category, geo, status
+            name,       # $1
+            ascii_val,  # $2
+            category,   # $3
+            geo,        # $4
+            status      # $5
         )
 
 
 async def get_categories_by_geo(geo: str) -> list[str]:
-    """
-    Возвращает список уникальных категорий из таблицы celebrities
-    для заданного geo.
-    """
+    await init_db()
+    assert pool is not None
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
@@ -170,3 +195,31 @@ async def get_categories_by_geo(geo: str) -> list[str]:
             geo
         )
     return [r["category"] for r in rows]
+
+
+async def add_subscriber(chat_id: int) -> None:
+    """
+    Сохраняет chat_id в таблице, если ещё нет.
+    """
+    await init_db()
+    assert pool is not None
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO subscribers(chat_id)
+            VALUES($1)
+            ON CONFLICT (chat_id) DO NOTHING
+            """,
+            chat_id
+        )
+
+
+async def get_all_subscribers() -> list[int]:
+    """
+    Возвращает список всех chat_id из subscribers.
+    """
+    await init_db()
+    assert pool is not None
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT chat_id FROM subscribers")
+    return [r["chat_id"] for r in rows]
