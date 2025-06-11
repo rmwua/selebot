@@ -125,15 +125,19 @@ async def handle_request(name_input: str, category: str, geo: str, message: type
     new_search_b = new_search_button()
 
     if matched:
-        if matched['category'].lower() == 'жкт':
-            matched['category'] = 'ЖКТ'
+        name = matched['name']
+        status = matched['status']
+        category = matched['category']
+        geo = matched['geo']
+        display_category = 'ЖКТ' if category.lower() == 'жкт' else category.title()
+
         emoji = "✅" if matched['status'].lower() == 'согласована' else "⛔"
 
         await message.answer(
-            f"Селеба: {matched['name'].title()}\n"
-            f"Статус: {matched['status'].title()}{emoji}\n"
-            f"Категория: {matched['category'].title()}\n"
-            f"Гео: {matched['geo'].title()}",
+            f"Селеба: {name.title()}\n"
+            f"Статус: {status.title()}{emoji}\n"
+            f"Категория: {display_category}\n"
+            f"Гео: {geo.title()}",
             reply_markup=new_search_b.as_markup()
         )
     else:
