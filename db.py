@@ -5,13 +5,22 @@ from unidecode import unidecode
 
 import config
 from asyncpg import create_pool, Pool
+from transliterate import translit
+
 
 pool: Optional[Pool] = None
 
 
 def sanitize_cyr(text: str) -> str:
-    # для normalized_name: убираем пунктуацию, оставляем кириллицу
-    return re.sub(r"[^\w\s]", "", text, flags=re.UNICODE).strip().lower()
+    import re
+    if re.search(r'[a-z]', text, re.I):
+        try:
+            text = translit(text, 'ru', reversed=True)
+        except Exception:
+            pass
+
+    text = re.sub(r"[^\w\s]", "", text, flags=re.UNICODE)
+    return text.strip().lower()
 
 def sanitize_ascii(text: str) -> str:
     # для ascii_name: транслитерируем, потом очищаем
@@ -223,3 +232,55 @@ async def get_all_subscribers() -> list[int]:
     async with pool.acquire() as conn:
         rows = await conn.fetch("SELECT chat_id FROM subscribers")
     return [r["chat_id"] for r in rows]
+
+
+async def update_celebrity(name:str, geo:str, category:str, status:str, new_name=None, new_geo=None, new_cat=None, new_status=None) -> None:
+    await init_db()
+    assert pool is not None
+
+    updates={}
+    if new_name:
+        updates["name"] = new_name.lower()
+        updates["normalized_name"] = sanitize_cyr(new_name)
+        updates["ascii_name"] = sanitize_ascii(new_name)
+    if new_cat:
+        updates["category"] = new_cat.lower()
+    if new_geo:
+        updates["geo"] = new_geo.lower()
+    if new_status:
+        updates["status"] = new_status.lower()
+
+    set_clauses = []
+    set_values = []
+    for i, (col, val) in enumerate(updates.items(), start=1):
+        set_clauses.append(f"{col} = ${i}")
+        set_values.append(val)
+    set_sql = ", ".join(set_clauses)
+
+    where_values = [name, geo, category]
+    where_sql = f"name = ${len(set_values)+1} AND geo = ${len(set_values)+2} AND category = ${len(set_values)+3}"
+
+    query = f"""
+        UPDATE celebrities
+        SET {set_sql}
+        WHERE {where_sql};
+    """
+
+    params = set_values + where_values
+
+    async with pool.acquire() as conn:
+        await conn.execute(query, *params)
+
+
+async def delete_celebrity(name:str, geo:str, category:str, status:str) -> None:
+    await init_db()
+    assert pool is not None
+
+    query = """
+    DELETE FROM celebrities
+    WHERE name = $1 AND category = $2 AND geo = $3;
+    """
+
+    params = [name, category, geo]
+    async with pool.acquire() as conn:
+        await conn.execute(query, *params)

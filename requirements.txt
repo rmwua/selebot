@@ -33,3 +33,5 @@ tzdata==2025.2
 unicode==2.9
 Unidecode==1.4.0
 yarl==1.20.0
+
+transliterate~=1.10.2
