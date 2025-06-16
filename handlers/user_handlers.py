@@ -71,7 +71,6 @@ async def cat_chosen(call: types.CallbackQuery, state: FSMContext):
     kb.button(text="🔙 Назад", callback_data="back:cat")
     kb.adjust(1)
 
-    await state.set_state(SearchMenu.entering_name)
     await call.message.edit_text(
         f"Вы выбрали категорию «{cat_key.title()}». Введите теперь имя знаменитости:",
         reply_markup=kb.as_markup()
@@ -148,32 +147,25 @@ async def handle_request(name_input: str, category: str, geo: str, message: type
             reply_markup=get_new_search_button().as_markup(),
         )
 
-        kb = InlineKeyboardBuilder()
-        kb.button(text="Посмотреть", callback_data="available_celebs")
-        await message.answer(
-            text="Вы можете посмотреть список доступных Селебов по данному гео и категории",
-            reply_markup=kb.as_markup()
-        )
-
-        await state.update_data(geo=geo, category=category)
-
 
 async def available_celebs_handler(call: types.CallbackQuery, celebrity_service: CelebrityService, state: FSMContext):
+    await call.answer()
     data = await state.get_data()
     geo = data.get('geo')
-    category = data['category']
+    category = data.get('cat')
     celebs = await celebrity_service.get_celebrities(geo, category)
     if celebs:
-        text = "Доступные селебы:\n\n" + "\n".join(celebs)
+        text = "Доступные селебы:\n\n" + "\n".join(c.title() for c in celebs)
         await call.message.answer(text)
         await call.answer()
     else:
-        await call.message.answer("Пока нет добавленных селебов по этому гео и категории.")
+        await call.message.answer("Пока нет добавленных селебов по этому гео и категории. Вы можете отправить заявку модератору через команду /start")
         await call.answer()
+    kb = get_new_search_button()
+    await call.message.edit_reply_markup(reply_markup=kb.as_markup())
 
 
-
-async def callback_handler(call: types.CallbackQuery, requests_service: RequestsService, celebrity_service: CelebrityService):
+async def callback_handler(call: types.CallbackQuery, requests_service: RequestsService, celebrity_service: CelebrityService, state: FSMContext):
     handled = await handle_request_moderator(call, requests_service, celebrity_service)
 
     name     = handled["name"]
@@ -183,21 +175,31 @@ async def callback_handler(call: types.CallbackQuery, requests_service: Requests
     msg_id   = handled["message_id"]
     status =  handled["status"]
     prompt_id = handled["prompt_id"]
-    emoji = "✅" if status == "согласована" else "⛔"
 
-    new_search_b = get_new_search_button()
+    kb = get_new_search_button()
+
+    emoji = "⛔" if status == "нельзя использовать" else "✅"
+    text = [
+        f"Статус для `{name.title()}` — *{status}{emoji}*\n"
+        f"Категория: {category.title()}\n"
+        f"Гео: {geo.title()}"
+    ]
+
+    if status == "нельзя использовать":
+        kb.button(text="Посмотреть", callback_data="available_celebs")
+        text.append("\nВы можете посмотреть список доступных Селебов по данному гео и категории")
+        await state.update_data(geo=geo, category=category)
+
+    text = "\n".join(text)
 
     await call.bot.send_message(
         chat_id=chat_id,
-        text=(
-            f"Статус для `{name.title()}` — *{status}{emoji}*\n"
-            f"Категория: {category.title()}\n"
-            f"Гео: {geo.title()}"
-        ),
+        text=text,
         parse_mode="Markdown",
         reply_to_message_id=msg_id,
-        reply_markup=new_search_b.as_markup()
+        reply_markup=kb.as_markup()
     )
+
     await call.bot.delete_message(chat_id=chat_id, message_id=prompt_id)
 
 
@@ -236,3 +238,46 @@ async def back_handler(call: types.CallbackQuery, state: FSMContext, subscribers
 async def new_search_handler(call: types.CallbackQuery, state: FSMContext, subscribers_service: SubscribersService):
     await call.answer()
     return await cmd_start(call.message, state, subscribers_service)
+
+
+async def cmd_approved(message: types.Message, state: FSMContext):
+    await message.delete()
+    geo_kb = get_geo_keyboard(back_button_callback_data="cancel", back_button_text="Отмена", action_type="geo_approved")
+    await state.set_state(SearchMenu.choosing_geo)
+    await message.answer("Выберите регион:", reply_markup=geo_kb.as_markup())
+
+
+async def cancel_handler(call: types.CallbackQuery, state: FSMContext):
+    await call.answer()
+    await call.message.delete()
+    await state.clear()
+
+
+async def approved_geo_chosen_handler(call: types.CallbackQuery, state: FSMContext):
+    await call.answer()
+    await state.set_state(SearchMenu.choosing_cat)
+    geo_key = call.data.split(":", 1)[1]
+    selected_geo = geo_synonyms[geo_key]
+    await state.update_data(geo=selected_geo)
+
+    cat_kb = get_categories_keyboard(back_button_callback_data="back:approved", action_type="cat_approved")
+
+    await call.message.edit_text(
+        f"Вы выбрали регион «{selected_geo}». Теперь выберите категорию:",
+        reply_markup=cat_kb.as_markup()
+    )
+
+async def back_to_approved_handler(call: types.CallbackQuery, state: FSMContext):
+    await call.answer()
+    await state.clear()
+    await cmd_approved(call.message, state)
+    await call.message.delete()
+
+
+async def approved_cat_chosen_handler(call: types.CallbackQuery, state: FSMContext, celebrity_service: CelebrityService):
+    await call.answer()
+    cat = call.data.split(":", 1)[1]
+    await state.update_data(cat=cat)
+    await call.message.delete()
+    await available_celebs_handler(call, celebrity_service, state)
+

@@ -1,6 +1,6 @@
 import asyncio
 from aiogram.fsm.context import FSMContext
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from aiogram.types import CallbackQuery
 import config
 from aiogram import types
 from aiogram import Bot, Dispatcher, F
@@ -21,7 +21,8 @@ from handlers.user_handlers import (
     cat_chosen,
     name_entered,
     SearchMenu,
-    manual_handler, back_handler, new_search_handler, available_celebs_handler,
+    manual_handler, back_handler, new_search_handler, available_celebs_handler, cmd_approved, cancel_handler,
+    approved_geo_chosen_handler, back_to_approved_handler, approved_cat_chosen_handler,
 )
 from states import EditCelebrity
 
@@ -34,6 +35,8 @@ async def main():
     dp.update.middleware(ServiceMiddleware(pool))
 
     dp.message.register(cmd_start, Command("start"))
+    dp.message.register(cmd_approved, Command("approved"))
+
     dp.message.register(name_entered, StateFilter(SearchMenu.entering_name))
     dp.message.register(manual_handler, StateFilter(SearchMenu.manual_entry))
 
@@ -53,6 +56,10 @@ async def main():
     dp.callback_query.register(new_param_chosen, F.data.startswith("edit_cat:") | F.data.startswith("edit_geo:") | F.data.startswith("edit_status"),StateFilter(EditCelebrity.editing_param))
     dp.callback_query.register(delete_celebrity_handler, F.data == "edit:delete", StateFilter(EditCelebrity.deleting_entry))
 
+    dp.callback_query.register(cancel_handler, F.data == "cancel", StateFilter(SearchMenu.choosing_geo))
+    dp.callback_query.register(approved_geo_chosen_handler, F.data.startswith("geo_approved"), StateFilter(SearchMenu.choosing_geo))
+    dp.callback_query.register(back_to_approved_handler, F.data == "back:approved", StateFilter(SearchMenu.choosing_cat))
+    dp.callback_query.register(approved_cat_chosen_handler, F.data.startswith("cat_approved"))
 
     async def on_startup():
         await DatabaseManager.init()
@@ -65,24 +72,25 @@ async def main():
 
         await bot.set_my_commands([
             types.BotCommand(command="start", description="Новый поиск"),
+            types.BotCommand(command="approved", description="Список согласованных селеб")
         ])
 
         # send message to all suscribers on update
-        subs = await dp['subscribers_service'].get_all_subscribers()
-        start_kb = InlineKeyboardMarkup(
-        inline_keyboard=[
-                [InlineKeyboardButton(text="🚀 START", callback_data="start:from_broadcast")]
-            ],
-        )
-        for chat_id in subs:
-            try:
-                await bot.send_message(
-                    chat_id,
-                    "🚀 Бот обновлён до новой версии! Всё готово — нажмите START, чтобы продолжить.",
-                    reply_markup=start_kb
-                )
-            except Exception:
-                pass
+        # subs = await dp['subscribers_service'].get_all_subscribers()
+        # start_kb = InlineKeyboardMarkup(
+        # inline_keyboard=[
+        #         [InlineKeyboardButton(text="🚀 START", callback_data="start:from_broadcast")]
+        #     ],
+        # )
+        # for chat_id in subs:
+        #     try:
+        #         await bot.send_message(
+        #             chat_id,
+        #             "🚀 Бот обновлён до новой версии! Всё готово — нажмите START, чтобы продолжить.",
+        #             reply_markup=start_kb
+        #         )
+        #     except Exception:
+        #         pass
 
 
     async def on_shutdown():

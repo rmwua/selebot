@@ -43,6 +43,7 @@ async def edit_handler(call: CallbackQuery, state: FSMContext):
 
 
 async def field_chosen(call: CallbackQuery, state: FSMContext):
+    await call.answer()
     field = call.data.split(":")[1]
     user_id = int(call.from_user.id)
 
@@ -166,6 +167,7 @@ async def new_param_chosen(call: CallbackQuery, state: FSMContext, celebrity_ser
 
 
 async def delete_celebrity_handler(call: CallbackQuery, state: FSMContext, celebrity_service: CelebrityService):
+    await call.answer()
     data = await state.get_data()
     celeb_data = data.get("celebrity")
     orig_message_id = data.get("orig_message_id")

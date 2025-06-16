@@ -11,11 +11,11 @@ def get_new_search_button(show_edit_button: bool = False, is_moderator: bool = F
     return kb
 
 
-def get_geo_keyboard(back_button_callback_data:str = "back:method", action_type:str = "geo"):
+def get_geo_keyboard(back_button_callback_data:str = "back:method", action_type:str = "geo", back_button_text:str = "🔙 Назад"):
     kb = InlineKeyboardBuilder()
     for key, label in geo_flags.items():
         kb.button(text=label, callback_data=f"{action_type}:{key}")
-    kb.button(text="🔙 Назад", callback_data=back_button_callback_data)
+    kb.button(text=back_button_text, callback_data=back_button_callback_data)
     kb.adjust(3)
     return kb
 
