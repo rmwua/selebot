@@ -153,6 +153,7 @@ async def available_celebs_handler(call: types.CallbackQuery, celebrity_service:
     data = await state.get_data()
     geo = data.get('geo')
     category = data.get('cat')
+
     celebs = await celebrity_service.get_celebrities(geo, category)
     if celebs:
         text = "Доступные селебы:\n\n" + "\n".join(c.title() for c in celebs)
@@ -161,6 +162,7 @@ async def available_celebs_handler(call: types.CallbackQuery, celebrity_service:
     else:
         await call.message.answer("Пока нет добавленных селебов по этому гео и категории. Вы можете отправить заявку модератору через команду /start")
         await call.answer()
+
     kb = get_new_search_button()
     await call.message.edit_reply_markup(reply_markup=kb.as_markup())
 
@@ -188,7 +190,7 @@ async def callback_handler(call: types.CallbackQuery, requests_service: Requests
     if status == "нельзя использовать":
         kb.button(text="Посмотреть", callback_data="available_celebs")
         text.append("\nВы можете посмотреть список доступных Селебов по данному гео и категории")
-        await state.update_data(geo=geo, category=category)
+        await state.update_data(geo=geo, cat=category)
 
     text = "\n".join(text)
 
