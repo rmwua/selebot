@@ -1,11 +1,16 @@
 import asyncio
 from aiogram.fsm.context import FSMContext
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 import config
-import db
+from aiogram import types
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, StateFilter
 
+from db.celebrity_service import CelebrityService
+from db.database_manager import DatabaseManager
+from db.requests_service import RequestsService
+from db.service_middleware import ServiceMiddleware
+from db.subcribers_service import SubscribersService
 from handlers.moderator_handlers import edit_handler, field_chosen, name_edited, edit_back_button_handler, \
     new_param_chosen, delete_celebrity_handler
 from handlers.user_handlers import (
@@ -16,16 +21,17 @@ from handlers.user_handlers import (
     cat_chosen,
     name_entered,
     SearchMenu,
-    manual_handler, back_handler, new_search_handler,
+    manual_handler, back_handler, new_search_handler, available_celebs_handler,
 )
 from states import EditCelebrity
 
 
 async def main():
-    await db.init_db()
+    pool = await DatabaseManager.get_pool()
 
     bot = Bot(token=config.BOT_TOKEN)
     dp = Dispatcher()
+    dp.update.middleware(ServiceMiddleware(pool))
 
     dp.message.register(cmd_start, Command("start"))
     dp.message.register(name_entered, StateFilter(SearchMenu.entering_name))
@@ -34,6 +40,7 @@ async def main():
     dp.callback_query.register(mode_chosen, F.data.startswith("mode:"), StateFilter(SearchMenu.choosing_method))
     dp.callback_query.register(geo_chosen, F.data.startswith("geo:"), StateFilter(SearchMenu.choosing_geo))
     dp.callback_query.register(cat_chosen, F.data.startswith("cat:"), StateFilter(SearchMenu.choosing_cat))
+    dp.callback_query.register(available_celebs_handler, F.data == "available_celebs")
 
     dp.callback_query.register(callback_handler, F.data.startswith("approve:") | F.data.startswith("ban:"))
     dp.callback_query.register(back_handler,F.data.startswith("back:"))
@@ -48,7 +55,20 @@ async def main():
 
 
     async def on_startup():
-        subs = await db.get_all_subscribers()
+        await DatabaseManager.init()
+
+        dp['pool'] = pool
+
+        dp['celebrity_service'] = CelebrityService(pool)
+        dp['requests_service'] = RequestsService(pool)
+        dp['subscribers_service'] = SubscribersService(pool)
+
+        await bot.set_my_commands([
+            types.BotCommand(command="start", description="Новый поиск"),
+        ])
+
+        # send message to all suscribers on update
+        subs = await dp['subscribers_service'].get_all_subscribers()
         start_kb = InlineKeyboardMarkup(
         inline_keyboard=[
                 [InlineKeyboardButton(text="🚀 START", callback_data="start:from_broadcast")]
@@ -64,18 +84,22 @@ async def main():
             except Exception:
                 pass
 
+
+    async def on_shutdown():
+        await pool.close()
+
+
     async def start_from_broadcast(call: CallbackQuery, state: FSMContext):
         await call.answer()
-        await call.message.delete()
-        await cmd_start(call.message, state)
+        await cmd_start(call.message, state, dp['subscribers_service'])
+
 
     dp.startup.register(on_startup)
     dp.callback_query.register(
         start_from_broadcast,
         F.data == "start:from_broadcast"
     )
-
-    await dp.start_polling(bot, skip_updates=True, on_startup=on_startup)
+    await dp.start_polling(bot, skip_updates=True, on_startup=on_startup, on_shutdown=on_shutdown)
 
 
 if __name__ == "__main__":

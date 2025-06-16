@@ -2,7 +2,11 @@ from aiogram import types
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-import config, db
+import config
+from db.celebrity_service import CelebrityService
+from db.requests_service import RequestsService
+from db.subcribers_service import SubscribersService
+from handlers.moderator_handlers import send_request_to_moderator, handle_request_moderator
 from keyboards import get_new_search_button, get_geo_keyboard, get_categories_keyboard
 from states import SearchMenu
 
@@ -12,7 +16,7 @@ from utils import is_moderator
 logger = config.logger
 
 
-async def cmd_start(message: types.Message, state: FSMContext):
+async def cmd_start(message: types.Message, state: FSMContext, subscribers_service: SubscribersService):
     kb = InlineKeyboardBuilder()
     kb.button(text="🔎 По меню", callback_data="mode:menu")
     kb.button(text="✍️ Ручной ввод", callback_data="mode:manual")
@@ -20,23 +24,27 @@ async def cmd_start(message: types.Message, state: FSMContext):
     await state.clear()
     await state.set_state(SearchMenu.choosing_method)
     await message.answer("Как вы хотите искать?", reply_markup=kb.as_markup())
-    await db.add_subscriber(message.chat.id)
-
+    await subscribers_service.add_subscriber(message.chat.id)
+    if message.text and message.text.startswith('/start'):
+            try:
+                await message.delete()
+            except Exception as e:
+                pass
 
 async def mode_chosen(call: types.CallbackQuery, state: FSMContext):
     mode = call.data.split(":", 1)[1]
-    back_button = InlineKeyboardBuilder()
-    back_button.button(text="🔙 Назад", callback_data="back:method")
-    back_button.adjust(1)
+    await state.update_data(prompt_message_id=call.message.message_id)
 
     if mode == "menu":
         geo_kb = get_geo_keyboard()
         await state.set_state(SearchMenu.choosing_geo)
         await call.message.edit_text("Выберите регион:", reply_markup=geo_kb.as_markup())
     else:
+        back_button = InlineKeyboardBuilder()
+        back_button.button(text="🔙 Назад", callback_data="back:method")
+        back_button.adjust(1)
         await state.set_state(SearchMenu.manual_entry)
         await call.message.edit_text("Введите через запятую: Имя, Категория, Гео", reply_markup=back_button.as_markup())
-        await state.update_data(prompt_message_id=call.message.message_id)
     await call.answer()
 
 
@@ -68,21 +76,20 @@ async def cat_chosen(call: types.CallbackQuery, state: FSMContext):
         f"Вы выбрали категорию «{cat_key.title()}». Введите теперь имя знаменитости:",
         reply_markup=kb.as_markup()
     )
-    await state.update_data(prompt_message_id=call.message.message_id)
     await state.set_state(SearchMenu.entering_name)
     await call.answer()
 
 
-async def name_entered(message: types.Message, state: FSMContext):
+async def name_entered(message: types.Message, state: FSMContext, celebrity_service: CelebrityService, requests_service: RequestsService):
     data = await state.get_data()
     name_input = message.text.strip().lower()
     geo  = data['geo']
     cat  = data['category']
 
-    await handle_request(name_input, cat, geo, message, state)
+    await handle_request(name_input, cat, geo, message, state, celebrity_service, requests_service)
 
 
-async def manual_handler(message: types.Message, state: FSMContext):
+async def manual_handler(message: types.Message, state: FSMContext, celebrity_service: CelebrityService, requests_service: RequestsService):
     text = message.text.strip()
     parts = [p.strip() for p in text.split(",")]
     if len(parts) < 3:
@@ -101,14 +108,14 @@ async def manual_handler(message: types.Message, state: FSMContext):
     if geo is None:
         return await message.answer("Знаменитость не согласована. Данного гео пока нет.", reply_markup=new_search_b.as_markup())
 
-    await handle_request(name_input, category, geo, message, state)
+    await handle_request(name_input, category, geo, message, state, celebrity_service, requests_service)
 
 
-async def handle_request(name_input: str, category: str, geo: str, message: types.Message, state: FSMContext):
+async def handle_request(name_input: str, category: str, geo: str, message: types.Message, state: FSMContext, celebrity_service: CelebrityService, requests_service: RequestsService):
     data = await state.get_data()
     prompt_id = data.get('prompt_message_id')
     chat_id = message.chat.id
-    matched = await db.find_celebrity(name_input, category, geo)
+    matched = await celebrity_service.find_celebrity(name_input, category, geo)
     user_id = message.from_user.id
 
     if matched:
@@ -122,27 +129,15 @@ async def handle_request(name_input: str, category: str, geo: str, message: type
         emoji = "✅" if matched['status'].lower() == 'согласована' else "⛔"
 
         await message.answer(
-            f"Селеба: {name.title()}\n"
+            text=f"Селеба: {name.title()}\n"
             f"Статус: {status.title()}{emoji}\n"
-            f"Категория: {display_category}\n"
+            f"Категория: {display_category.title()}\n"
             f"Гео: {geo.title()}",
             reply_markup=get_new_search_button(show_edit_button=True, is_moderator=is_moderator(user_id)).as_markup()
         )
+        await message.bot.delete_message(chat_id=chat_id, message_id=prompt_id)
     else:
-        request_id = await db.add_pending_request(
-            message.from_user.id,
-            message.chat.id,
-            message.message_id,
-            name_input,
-            category,
-            geo,
-            prompt_id
-        )
-
-        builder = InlineKeyboardBuilder()
-        builder.button(text="✅ Одобрить", callback_data=f"approve:{request_id}")
-        builder.button(text="⛔ Забанить", callback_data=f"ban:{request_id}")
-        builder.adjust(2)
+        request_id = await send_request_to_moderator(name_input, category, geo, prompt_id, message, requests_service)
 
         text = f"Ваш запрос в обработке, ожидайте ответа модератора. Номер заявки: {request_id}"
 
@@ -153,34 +148,42 @@ async def handle_request(name_input: str, category: str, geo: str, message: type
             reply_markup=get_new_search_button().as_markup(),
         )
 
-        await message.bot.send_message(
-            config.MODERATOR_ID,
-            f"Новая заявка:\nИмя: {name_input}\nКатегория: {category}\nГео: {geo}\nНомер Заявки: {request_id}",
-            reply_markup=builder.as_markup()
+        kb = InlineKeyboardBuilder()
+        kb.button(text="Посмотреть", callback_data="available_celebs")
+        await message.answer(
+            text="Вы можете посмотреть список доступных Селебов по данному гео и категории",
+            reply_markup=kb.as_markup()
         )
-        await state.clear()
+
+        await state.update_data(geo=geo, category=category)
 
 
-async def callback_handler(call: types.CallbackQuery):
-    action, req_id = call.data.split(":", 1)
-    is_approve = (action == "approve")
-    emoji = "✅" if is_approve else "⛔"
+async def available_celebs_handler(call: types.CallbackQuery, celebrity_service: CelebrityService, state: FSMContext):
+    data = await state.get_data()
+    geo = data.get('geo')
+    category = data['category']
+    celebs = await celebrity_service.get_celebrities(geo, category)
+    if celebs:
+        text = "Доступные селебы:\n\n" + "\n".join(celebs)
+        await call.message.answer(text)
+        await call.answer()
+    else:
+        await call.message.answer("Пока нет добавленных селебов по этому гео и категории.")
+        await call.answer()
 
-    pending = await db.pop_pending_request(int(req_id))
-    if not pending:
-        return await call.answer("Заявка не найдена или уже обработана", show_alert=True)
 
-    await call.bot.delete_message(
-        chat_id=pending["chat_id"],
-        message_id=pending["bot_message_id"]
-    )
 
-    name     = pending["celebrity_name"]
-    category = pending["category"]
-    geo      = pending["geo"]
-    chat_id  = pending["chat_id"]
-    msg_id   = pending["message_id"]
-    status = "Согласована" if is_approve else "Нельзя Использовать"
+async def callback_handler(call: types.CallbackQuery, requests_service: RequestsService, celebrity_service: CelebrityService):
+    handled = await handle_request_moderator(call, requests_service, celebrity_service)
+
+    name     = handled["name"]
+    category = handled["category"]
+    geo      = handled["geo"]
+    chat_id  = handled["chat_id"]
+    msg_id   = handled["message_id"]
+    status =  handled["status"]
+    prompt_id = handled["prompt_id"]
+    emoji = "✅" if status == "согласована" else "⛔"
 
     new_search_b = get_new_search_button()
 
@@ -195,31 +198,21 @@ async def callback_handler(call: types.CallbackQuery):
         reply_to_message_id=msg_id,
         reply_markup=new_search_b.as_markup()
     )
-
-    await call.bot.send_message(
-        config.MODERATOR_ID,
-        f"Заявка #{req_id} на «{name}» обработана: {status}"
-    )
-
-    name, category, geo, status = name.lower(), category.lower(), geo.lower(), status.lower()
-    await db.insert_celebrity(name, category, geo, status)
-
-    await call.answer("Готово", show_alert=False)
-    await call.message.delete()
+    await call.bot.delete_message(chat_id=chat_id, message_id=prompt_id)
 
 
-async def back_handler(call: types.CallbackQuery, state: FSMContext):
+async def back_handler(call: types.CallbackQuery, state: FSMContext, subscribers_service: SubscribersService):
     where = call.data.split(":", 1)[1]
     await call.answer()
 
     if where == "method":
-        # возврат в стартовое меню
+        # back to main menu
         await state.clear()
         await call.message.delete()
-        return await cmd_start(call.message, state)
+        return await cmd_start(call.message, state, subscribers_service)
 
     if where == "geo":
-        # возврат к выбору регионов
+        # back to choosing geo
         geo_kb = get_geo_keyboard()
         await state.set_state(SearchMenu.choosing_geo)
         return await call.message.edit_text(
@@ -228,7 +221,7 @@ async def back_handler(call: types.CallbackQuery, state: FSMContext):
         )
 
     if where == "cat":
-        # возврат к выбору категорий (после того как ввели имя)
+        # back to choosing category
         data = await state.get_data()
         geo = data.get("geo")
         cat_kb = get_categories_keyboard(back_button_callback_data="back:geo")
@@ -240,7 +233,6 @@ async def back_handler(call: types.CallbackQuery, state: FSMContext):
         )
 
 
-async def new_search_handler(call: types.CallbackQuery, state: FSMContext):
+async def new_search_handler(call: types.CallbackQuery, state: FSMContext, subscribers_service: SubscribersService):
     await call.answer()
-    await state.clear()
-    return await cmd_start(call.message, state)
+    return await cmd_start(call.message, state, subscribers_service)

@@ -1,3 +1,8 @@
+import re
+
+from transliterate import translit
+import unidecode
+
 import config
 
 
@@ -32,3 +37,24 @@ def parse_celebrity_from_msg(msg:str) -> dict:
         key, value = line.split(":", 1)
         result[key.strip().lower()] = value.strip().lower()
     return result
+
+
+def sanitize_cyr(text: str) -> str:
+    import re
+    if re.search(r'[a-z]', text, re.I):
+        try:
+            text = translit(text, 'ru')
+        except Exception:
+            pass
+
+    text = re.sub(r"[^\w\s]", "", text, flags=re.UNICODE)
+    return text.strip().lower()
+
+
+def sanitize_ascii(text: str) -> str:
+    if re.fullmatch(r'[A-Za-z0-9\s]+', text):
+        return text.strip().lower()
+    # для ascii_name: транслитерируем, потом очищаем
+    return re.sub(r"[^\w\s]", "", unidecode.unidecode(text), flags=re.UNICODE).strip().lower()
+
+
