@@ -267,6 +267,7 @@ async def approved_geo_chosen_handler(call: types.CallbackQuery, state: FSMConte
         reply_markup=cat_kb.as_markup()
     )
 
+
 async def back_to_approved_handler(call: types.CallbackQuery, state: FSMContext):
     await call.answer()
     await state.clear()

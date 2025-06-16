@@ -46,6 +46,7 @@ async def main():
     dp.callback_query.register(available_celebs_handler, F.data == "available_celebs")
 
     dp.callback_query.register(callback_handler, F.data.startswith("approve:") | F.data.startswith("ban:"))
+    dp.callback_query.register(back_to_approved_handler, F.data == "back:approved", StateFilter(SearchMenu.choosing_cat))
     dp.callback_query.register(back_handler,F.data.startswith("back:"))
     dp.callback_query.register(new_search_handler,F.data == "new_search")
 
@@ -56,10 +57,9 @@ async def main():
     dp.callback_query.register(new_param_chosen, F.data.startswith("edit_cat:") | F.data.startswith("edit_geo:") | F.data.startswith("edit_status"),StateFilter(EditCelebrity.editing_param))
     dp.callback_query.register(delete_celebrity_handler, F.data == "edit:delete", StateFilter(EditCelebrity.deleting_entry))
 
-    dp.callback_query.register(cancel_handler, F.data == "cancel", StateFilter(SearchMenu.choosing_geo))
     dp.callback_query.register(approved_geo_chosen_handler, F.data.startswith("geo_approved"), StateFilter(SearchMenu.choosing_geo))
-    dp.callback_query.register(back_to_approved_handler, F.data == "back:approved", StateFilter(SearchMenu.choosing_cat))
     dp.callback_query.register(approved_cat_chosen_handler, F.data.startswith("cat_approved"))
+    dp.callback_query.register(cancel_handler, F.data == "cancel")
 
     async def on_startup():
         await DatabaseManager.init()

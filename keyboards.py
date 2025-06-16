@@ -20,7 +20,7 @@ def get_geo_keyboard(back_button_callback_data:str = "back:method", action_type:
     return kb
 
 
-def get_categories_keyboard(back_button_callback_data:str, action_type:str = "cat"):
+def get_categories_keyboard(back_button_callback_data:str, action_type:str = "cat", back_button_text:str = "🔙 Назад"):
     categories = sorted(set(category_synonyms.values()))
     kb = InlineKeyboardBuilder()
     for cat in categories:
@@ -29,7 +29,7 @@ def get_categories_keyboard(back_button_callback_data:str, action_type:str = "ca
         else:
             label = " ".join(word.capitalize() for word in cat.split())
         kb.button(text=label, callback_data=f"{action_type}:{cat}")
-    kb.button(text="🔙 Назад", callback_data=back_button_callback_data)
+    kb.button(text=back_button_text, callback_data=back_button_callback_data)
     kb.adjust(2)
     return kb
 
