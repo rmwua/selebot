@@ -29,4 +29,5 @@ pending_requests = Table(
     Column("category", Text, nullable=False),
     Column("geo", Text, nullable=False),
     Column("created_at",     TIMESTAMP,  server_default=func.now(), nullable=False),
+    Column("username",       String,     nullable=True)
 )

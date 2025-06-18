@@ -12,7 +12,7 @@ from db.requests_service import RequestsService
 from db.service_middleware import ServiceMiddleware
 from db.subcribers_service import SubscribersService
 from handlers.moderator_handlers import edit_handler, field_chosen, name_edited, edit_back_button_handler, \
-    new_param_chosen, delete_celebrity_handler
+    new_param_chosen, delete_celebrity_handler, delete_request_handler, cmd_requests
 from handlers.user_handlers import (
     cmd_start,
     callback_handler,
@@ -36,6 +36,8 @@ async def main():
 
     dp.message.register(cmd_start, Command("start"))
     dp.message.register(cmd_approved, Command("approved"))
+    dp.message.register(cmd_requests, Command("requests"), F.from_user.id == config.MODERATOR_ID)
+    dp.message.register(lambda message: message.answer(f"❌ У вас нет прав для этой команды."),Command("requests"))
 
     dp.message.register(name_entered, StateFilter(SearchMenu.entering_name))
     dp.message.register(manual_handler, StateFilter(SearchMenu.manual_entry))
@@ -61,6 +63,8 @@ async def main():
     dp.callback_query.register(approved_cat_chosen_handler, F.data.startswith("cat_approved"))
     dp.callback_query.register(cancel_handler, F.data == "cancel")
 
+    dp.callback_query.register(delete_request_handler, F.data.startswith("delete:"))
+
     async def on_startup():
         await DatabaseManager.init()
 
@@ -70,12 +74,16 @@ async def main():
         dp['requests_service'] = RequestsService(pool)
         dp['subscribers_service'] = SubscribersService(pool)
 
-        await bot.set_my_commands([
+        common_commands = [
             types.BotCommand(command="start", description="Новый поиск"),
             types.BotCommand(command="approved", description="Список согласованных селеб")
-        ])
+        ]
+        mod_commands = common_commands + [types.BotCommand(command="requests", description="Посмотреть активные заявки ")]
 
-        # send message to all suscribers on update
+        await bot.set_my_commands(mod_commands, scope=types.BotCommandScopeChat(chat_id=config.MODERATOR_ID))
+        await bot.set_my_commands(common_commands)
+
+        # send message to all subscribers on update
         # subs = await dp['subscribers_service'].get_all_subscribers()
         # start_kb = InlineKeyboardMarkup(
         # inline_keyboard=[

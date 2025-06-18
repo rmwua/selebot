@@ -10,7 +10,8 @@ class RequestsService:
             celebrity_name: str,
             category: str,
             geo: str,
-            bot_message_id: int
+            bot_message_id: int,
+            username: str
     ) -> int:
         async with self.pool.acquire() as conn:
             return await conn.fetchval(
@@ -18,13 +19,13 @@ class RequestsService:
                 INSERT INTO pending_requests(
                   user_id, chat_id, message_id,
                   celebrity_name, category, geo,
-                  bot_message_id
-                ) VALUES($1,$2,$3,$4,$5,$6,$7)
+                  bot_message_id, username
+                ) VALUES($1,$2,$3,$4,$5,$6,$7,$8)
                 RETURNING id;
                 """,
                 user_id, chat_id, message_id,
                 celebrity_name, category, geo,
-                bot_message_id
+                bot_message_id, username
             )
 
     async def pop_pending_request(self, request_id: int) -> dict | None:
@@ -40,7 +41,7 @@ class RequestsService:
                    celebrity_name,
                    category,
                    geo,
-                   bot_message_id;
+                   bot_message_id, username
                 """,
                 request_id
             )
@@ -48,7 +49,7 @@ class RequestsService:
     async def get_all_pending_requests(self) -> list:
         async with self.pool.acquire() as conn:
             sql = """
-            SELECT id, celebrity_name, category, geo, bot_message_id
+            SELECT id, celebrity_name, category, geo, username
             FROM pending_requests
             """
             rows = await conn.fetch(sql)

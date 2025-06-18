@@ -202,30 +202,39 @@ async def edit_back_button_handler(call: CallbackQuery, state: FSMContext):
         return
 
 
-async def cmd_get_all_requests(message: Message, requests_service: RequestsService):
+async def cmd_requests(message: Message, requests_service: RequestsService):
+    await message.delete()
     requests = await requests_service.get_all_pending_requests()
-    if requests is None:
+    if not requests:
         await message.answer("Активных заявок нет.")
         return
 
     for request in requests:
-        request_id, name, cat, geo = request[:4]
+        request_id, name, cat, geo, username = request[:5]
         builder = InlineKeyboardBuilder()
         builder.button(text="✅ Одобрить", callback_data=f"approve:{request_id}")
         builder.button(text="⛔ Забанить", callback_data=f"ban:{request_id}")
-        builder.button(text="❌ Удалить заявку", callback_data=f"delete:{request_id}")
-        builder.adjust(2)
+        builder.button(text="🗑 Удалить заявку", callback_data=f"delete:{request_id}")
+        builder.adjust(2, 1)
 
         await message.answer(
-            f"Необработанная заявка:\nИмя: {name}\nКатегория: {cat}\nГео: {geo}\nНомер Заявки: {request_id}",
-            reply_markup=builder.as_markup()
+            f"<b>Необработанная заявка:</b>\nИмя: {name.title()}\nКатегория: {cat.title()}\nГео: {geo.title()}\nНомер Заявки: {request_id}\nЮзер: {'@'+username if username else ''}",
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML",
         )
 
 
-async def send_request_to_moderator(name_input: str, category: str, geo: str, prompt_id: int, message: Message, requests_service: RequestsService):
+async def delete_request_handler(call: CallbackQuery, requests_service: RequestsService):
+    await call.message.delete()
+    request_id = call.data.split(":", 1)[1]
+    await requests_service.pop_pending_request(int(request_id))
+    await call.answer(text="Заявка удалена")
+
+
+async def send_request_to_moderator(name_input: str, category: str, geo: str, prompt_id: int, username:str, message: Message, requests_service: RequestsService):
     request_id = await requests_service.add_pending_request(
         message.from_user.id, message.chat.id, message.message_id,
-        name_input, category, geo, prompt_id
+        name_input, category, geo, prompt_id, username
     )
 
     builder = InlineKeyboardBuilder()
@@ -235,8 +244,9 @@ async def send_request_to_moderator(name_input: str, category: str, geo: str, pr
 
     await message.bot.send_message(
         config.MODERATOR_ID,
-        f"Новая заявка:\nИмя: {name_input.title()}\nКатегория: {category.title()}\nГео: {geo.title()}\nНомер Заявки: {request_id}",
-        reply_markup=builder.as_markup()
+        f"<b>Новая заявка:</b>\n\nИмя: {name_input.title()}\nКатегория: {category.title()}\nГео: {geo.title()}\nНомер Заявки: {request_id}\nЮзер: @{username}",
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML"
     )
 
     return request_id
@@ -256,6 +266,7 @@ async def handle_request_moderator(call, requests_service: RequestsService, cele
     category = pending.get("category")
     geo      = pending.get("geo")
     prompt_id = pending.get("bot_message_id")
+    username = pending.get("username")
     status = "Согласована" if is_approve else "Нельзя Использовать"
 
     name, category, geo, status = map(lambda x: x.lower() if x else '', (name, category, geo, status))
@@ -265,7 +276,7 @@ async def handle_request_moderator(call, requests_service: RequestsService, cele
 
     await call.bot.send_message(
         config.MODERATOR_ID,
-        f"Заявка #{req_id} на {name.title()} обработана: {status}"
+        f"Заявка #{req_id} для @{username} на {name.title()} обработана: {status}"
     )
 
     await call.message.delete()

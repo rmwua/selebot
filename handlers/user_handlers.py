@@ -116,6 +116,7 @@ async def handle_request(name_input: str, category: str, geo: str, message: type
     chat_id = message.chat.id
     matched = await celebrity_service.find_celebrity(name_input, category, geo)
     user_id = message.from_user.id
+    username = message.from_user.username
 
     if matched:
         name = matched['name']
@@ -127,16 +128,26 @@ async def handle_request(name_input: str, category: str, geo: str, message: type
 
         emoji = "✅" if matched['status'].lower() == 'согласована' else "⛔"
 
+        text = [f"Селеба: {name.title()}\n"
+        f"Статус: {status.title()}{emoji}\n"
+        f"Категория: {display_category.title()}\n"
+        f"Гео: {geo.title()}"]
+
+        kb = get_new_search_button(show_edit_button=True, is_moderator=is_moderator(user_id))
+        if status.lower() == "нельзя использовать":
+            kb.button(text="Посмотреть селеб", callback_data="available_celebs")
+            text.append("\nВы можете ознакомиться с доступным списком селеб по данному гео/категории:")
+            await state.update_data(geo=geo, cat=category)
+
+        text = "\n".join(text)
+
         await message.answer(
-            text=f"Селеба: {name.title()}\n"
-            f"Статус: {status.title()}{emoji}\n"
-            f"Категория: {display_category.title()}\n"
-            f"Гео: {geo.title()}",
-            reply_markup=get_new_search_button(show_edit_button=True, is_moderator=is_moderator(user_id)).as_markup()
+            text=text,
+            reply_markup=kb.as_markup()
         )
         await message.bot.delete_message(chat_id=chat_id, message_id=prompt_id)
     else:
-        request_id = await send_request_to_moderator(name_input, category, geo, prompt_id, message, requests_service)
+        request_id = await send_request_to_moderator(name_input, category, geo, prompt_id, username, message, requests_service)
 
         text = f"Ваш запрос в обработке, ожидайте ответа модератора. Номер заявки: {request_id}"
 
@@ -188,8 +199,8 @@ async def callback_handler(call: types.CallbackQuery, requests_service: Requests
     ]
 
     if status == "нельзя использовать":
-        kb.button(text="Посмотреть", callback_data="available_celebs")
-        text.append("\nВы можете посмотреть список доступных Селебов по данному гео и категории")
+        kb.button(text="Посмотреть селеб", callback_data="available_celebs")
+        text.append("\nВы можете ознакомиться с доступным списком селеб по данному гео/категории:")
         await state.update_data(geo=geo, cat=category)
 
     text = "\n".join(text)
