@@ -171,7 +171,7 @@ async def available_celebs_handler(call: types.CallbackQuery, celebrity_service:
         await call.message.answer(text)
         await call.answer()
     else:
-        await call.message.answer("Пока нет согласованных селебов по этому гео и категории. Вы можете отправить заявку модератору через команду /start")
+        await call.message.answer("Пока нет согласованных селеб по этому гео и категории. Вы можете отправить заявку модератору через команду /start")
         await call.answer()
 
     kb = get_new_search_button()
