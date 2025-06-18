@@ -110,7 +110,7 @@ async def name_edited(message: Message, state: FSMContext, celebrity_service: Ce
 
     try:
         await celebrity_service.update_celebrity(**celeb_data, new_name=name_input.lower())
-        celeb_data["name"] = name_input.lower()  # <-- обновляем name в state
+        celeb_data["name"] = name_input.lower()
         await state.update_data(celebrity=celeb_data, orig_message_text=orig_msg_new_text)
     except UniqueViolationError as e:
         pass
