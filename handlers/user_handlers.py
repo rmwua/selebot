@@ -39,7 +39,8 @@ async def cmd_start(message: types.Message, subscribers_service: SubscribersServ
     await subscribers_service.add_subscriber(message.chat.id, message.from_user.username)
 
     await message.answer(text="👋 Привет! Я — бот для поиска и согласования селеб."
-                              "\n\n🔍 Чтобы начать поиск, отправьте команду /search"
+                              "\n\n🔍 Чтобы начать поиск, отправьте команду"
+                              "\n/search"
                               "\n\n❓ Если нужной селебы нет в нашей базе, ваш запрос попадёт к модератору для обработки."
                               "\n\n✅ Также вы можете посмотреть список согласованных селеб командой /approved")
 
@@ -160,11 +161,14 @@ async def handle_request(name_input: str, category: str, geo: str, message: type
         f"Категория: {display_category.title()}\n"
         f"Гео: {geo.title()}"]
 
-        kb = get_new_search_button(show_edit_button=True, is_moderator=is_moderator(user_id))
+        show_celebs = False
         if status.lower() == "нельзя использовать":
-            kb.button(text="Посмотреть селеб", callback_data="available_celebs")
             text.append("\nВы можете ознакомиться с доступным списком селеб по данному гео/категории:")
+            show_celebs = True
             await state.update_data(geo=geo, cat=category)
+
+        kb = get_new_search_button(show_edit_button=True, is_moderator=is_moderator(user_id), show_celebs=show_celebs)
+        kb.adjust(1)
 
         text = "\n".join(text)
 
@@ -218,8 +222,6 @@ async def callback_handler(call: types.CallbackQuery, requests_service: Requests
     status =  handled["status"]
     prompt_id = handled["prompt_id"]
 
-    kb = get_new_search_button()
-
     emoji = "⛔" if status == "нельзя использовать" else "✅"
     text = [
         f"Статус для `{name.title()}` — *{status}{emoji}*\n"
@@ -227,11 +229,13 @@ async def callback_handler(call: types.CallbackQuery, requests_service: Requests
         f"Гео: {geo.title()}"
     ]
 
+    show_celebs = False
     if status == "нельзя использовать":
-        kb.button(text="Посмотреть селеб", callback_data="available_celebs")
+        show_celebs = True
         text.append("\nВы можете ознакомиться с доступным списком селеб по данному гео/категории:")
         await state.update_data(geo=geo, cat=category)
 
+    kb = get_new_search_button(show_celebs=show_celebs or False)
     text = "\n".join(text)
 
     await call.bot.send_message(

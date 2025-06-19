@@ -3,8 +3,10 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from synonyms import geo_flags, category_synonyms
 
 
-def get_new_search_button(show_edit_button: bool = False, is_moderator: bool = False):
+def get_new_search_button(show_edit_button: bool = False, is_moderator: bool = False, show_celebs: bool = False):
     kb = InlineKeyboardBuilder()
+    if show_celebs:
+        kb.button(text="Посмотреть селеб", callback_data="available_celebs")
     kb.button(text="🔄 Новый поиск", callback_data="new_search")
     if show_edit_button and is_moderator:
         kb.button(text="✏️ Редактировать", callback_data="edit")
