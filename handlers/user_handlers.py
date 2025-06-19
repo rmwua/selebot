@@ -85,7 +85,7 @@ async def geo_chosen(call: types.CallbackQuery, state: FSMContext):
 
     await state.set_state(SearchMenu.choosing_cat)
     await call.message.edit_text(
-        f"Вы выбрали регион «{selected_geo}». Теперь выберите категорию:",
+        f"Вы выбрали регион «{selected_geo.title()}». Теперь выберите категорию:",
         reply_markup=cat_kb.as_markup()
     )
     await call.answer()
@@ -276,7 +276,7 @@ async def back_handler(call: types.CallbackQuery, state: FSMContext, subscribers
 
         await state.set_state(SearchMenu.choosing_cat)
         return await call.message.edit_text(
-            f"Регион «{geo.title()}». Выберите категорию:",
+            f"Вы выбрали регион «{geo.title()}». Выберите категорию:",
             reply_markup=cat_kb.as_markup()
         )
 
@@ -309,7 +309,7 @@ async def approved_geo_chosen_handler(call: types.CallbackQuery, state: FSMConte
     cat_kb = get_categories_keyboard(back_button_callback_data="back:approved", action_type="cat_approved")
 
     await call.message.edit_text(
-        f"Вы выбрали регион «{selected_geo}». Теперь выберите категорию:",
+        f"Вы выбрали регион «{selected_geo.title()}». Теперь выберите категорию:",
         reply_markup=cat_kb.as_markup()
     )
 
