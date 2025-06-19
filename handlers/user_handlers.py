@@ -1,7 +1,4 @@
 import asyncio
-from asyncio import sleep
-from uuid import uuid4
-
 from aiogram import types
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
@@ -43,7 +40,7 @@ async def cmd_start(message: types.Message, subscribers_service: SubscribersServ
 
     await message.answer(text="👋 Привет! Я — бот для поиска и согласования селеб."
                               "\n\n🔍 Чтобы начать поиск, отправьте команду /search"
-                              "\n\n❓ Если нужного селеба нет в нашей базе, ваш запрос попадёт к модератору для обработки."
+                              "\n\n❓ Если нужной селебы нет в нашей базе, ваш запрос попадёт к модератору для обработки."
                               "\n\n✅ Также вы можете посмотреть список согласованных селеб командой /approved")
 
 
