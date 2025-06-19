@@ -33,7 +33,7 @@ async def cmd_start(message: types.Message, subscribers_service: SubscribersServ
 
     async def reset_flag():
         await asyncio.sleep(2)
-        await state.clear()
+        await state.update_data(started=False)
     asyncio.create_task(reset_flag())
 
     await state.update_data(started=True)
@@ -55,7 +55,6 @@ async def cmd_search(message: types.Message, state: FSMContext, subscribers_serv
     await state.clear()
     await state.set_state(SearchMenu.choosing_method)
     await message.answer("Как вы хотите искать?", reply_markup=kb.as_markup())
-    await subscribers_service.add_subscriber(message.chat.id)
     if message.text and message.text.startswith('/search'):
             try:
                 await message.delete()
