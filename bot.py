@@ -12,9 +12,9 @@ from db.requests_service import RequestsService
 from db.service_middleware import ServiceMiddleware
 from db.subcribers_service import SubscribersService
 from handlers.moderator_handlers import edit_handler, field_chosen, name_edited, edit_back_button_handler, \
-    new_param_chosen, delete_celebrity_handler, delete_request_handler, cmd_requests
+    new_param_chosen, delete_celebrity_handler, delete_request_handler, cmd_requests, cmd_users
 from handlers.user_handlers import (
-    cmd_start,
+    cmd_search, cmd_start,
     callback_handler,
     mode_chosen,
     geo_chosen,
@@ -35,9 +35,12 @@ async def main():
     dp.update.middleware(ServiceMiddleware(pool))
 
     dp.message.register(cmd_start, Command("start"))
+    dp.message.register(cmd_search, Command("search"))
     dp.message.register(cmd_approved, Command("approved"))
     dp.message.register(cmd_requests, Command("requests"), F.from_user.id == config.MODERATOR_ID)
+    dp.message.register(cmd_users, Command("users"), F.from_user.id == config.MODERATOR_ID)
     dp.message.register(lambda message: message.answer(f"❌ У вас нет прав для этой команды."),Command("requests"))
+    dp.message.register(lambda message: message.answer(f"❌ У вас нет прав для этой команды."), Command("users"))
 
     dp.message.register(name_entered, StateFilter(SearchMenu.entering_name))
     dp.message.register(manual_handler, StateFilter(SearchMenu.manual_entry))
@@ -75,10 +78,12 @@ async def main():
         dp['subscribers_service'] = SubscribersService(pool)
 
         common_commands = [
-            types.BotCommand(command="start", description="Новый поиск"),
+            types.BotCommand(command="start", description="Инфо о боте"),
+            types.BotCommand(command="search", description="Новый поиск/Заявка модератору"),
             types.BotCommand(command="approved", description="Список согласованных селеб")
         ]
-        mod_commands = common_commands + [types.BotCommand(command="requests", description="Посмотреть активные заявки ")]
+        mod_commands = common_commands + [types.BotCommand(command="requests", description="Посмотреть активные заявки "),
+                                          types.BotCommand(command="users", description="Посмотреть кто подписан на бота")]
 
         await bot.set_my_commands(mod_commands, scope=types.BotCommandScopeChat(chat_id=config.MODERATOR_ID))
         await bot.set_my_commands(common_commands)
@@ -103,18 +108,18 @@ async def main():
 
     async def on_shutdown():
         await pool.close()
-
-
-    async def start_from_broadcast(call: CallbackQuery, state: FSMContext):
-        await call.answer()
-        await cmd_start(call.message, state, dp['subscribers_service'])
+    #
+    #
+    # async def start_from_broadcast(call: CallbackQuery, state: FSMContext):
+    #     await call.answer()
+    #     await cmd_start(call.message, state, dp['subscribers_service'])
 
 
     dp.startup.register(on_startup)
-    dp.callback_query.register(
-        start_from_broadcast,
-        F.data == "start:from_broadcast"
-    )
+    # dp.callback_query.register(
+    #     start_from_broadcast,
+    #     F.data == "start:from_broadcast"
+    # )
     await dp.start_polling(bot, skip_updates=True, on_startup=on_startup, on_shutdown=on_shutdown)
 
 

@@ -1,5 +1,6 @@
 import re
 
+from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
@@ -9,6 +10,7 @@ from asyncpg import UniqueViolationError
 import config
 from db.celebrity_service import CelebrityService
 from db.requests_service import RequestsService
+from db.subcribers_service import SubscribersService
 from keyboards import get_new_search_button, get_edit_keyboard, get_categories_keyboard, get_geo_keyboard
 from states import EditCelebrity
 from synonyms import geo_synonyms
@@ -282,3 +284,26 @@ async def handle_request_moderator(call, requests_service: RequestsService, cele
     await call.message.delete()
 
     return handled
+
+
+async def cmd_users(message: Message, subscribers_service: SubscribersService, bot: Bot):
+    await message.delete()
+    users = await subscribers_service.get_all_subscribers()
+    updated_users = []
+    for user in users:
+        username = user.get("username")
+        chat_id = user.get("chat_id")
+        if not username:
+            try:
+                tg_user = await bot.get_chat(chat_id)
+                username = tg_user.username
+                if username:
+                    await subscribers_service.add_subscriber(chat_id, username)
+            except Exception:
+                username = None
+        updated_users.append("@" + username if username else chat_id)
+
+    if not updated_users:
+        await message.answer("Юзеры недоступны")
+    else:
+        await message.answer("/n".join(updated_users))

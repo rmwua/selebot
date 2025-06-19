@@ -31,3 +31,10 @@ pending_requests = Table(
     Column("created_at",     TIMESTAMP,  server_default=func.now(), nullable=False),
     Column("username",       String,     nullable=True)
 )
+
+
+subscribers = Table(
+    "subscribers", metadata,
+    Column("chat_id", BigInteger, primary_key=True),
+    Column("username", String, nullable=True),
+)

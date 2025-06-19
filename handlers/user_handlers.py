@@ -1,4 +1,9 @@
+import asyncio
+from asyncio import sleep
+from uuid import uuid4
+
 from aiogram import types
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -16,7 +21,33 @@ from utils import is_moderator
 logger = config.logger
 
 
-async def cmd_start(message: types.Message, state: FSMContext, subscribers_service: SubscribersService):
+async def cmd_start(message: types.Message, subscribers_service: SubscribersService, state: FSMContext):
+    try:
+        await message.delete()
+    except TelegramBadRequest:
+        pass
+
+    data = await state.get_data()
+    if data.get("started"):
+        return
+
+    async def reset_flag():
+        await asyncio.sleep(2)
+        await state.clear()
+    asyncio.create_task(reset_flag())
+
+    await state.update_data(started=True)
+
+
+    await subscribers_service.add_subscriber(message.chat.id, message.from_user.username)
+
+    await message.answer(text="👋 Привет! Я — бот для поиска и согласования селеб."
+                              "\n\n🔍 Чтобы начать поиск, отправьте команду /search"
+                              "\n\n❓ Если нужного селеба нет в нашей базе, ваш запрос попадёт к модератору для обработки."
+                              "\n\n✅ Также вы можете посмотреть список согласованных селеб командой /approved")
+
+
+async def cmd_search(message: types.Message, state: FSMContext, subscribers_service: SubscribersService):
     kb = InlineKeyboardBuilder()
     kb.button(text="🔎 По меню", callback_data="mode:menu")
     kb.button(text="✍️ Ручной ввод", callback_data="mode:manual")
@@ -25,7 +56,7 @@ async def cmd_start(message: types.Message, state: FSMContext, subscribers_servi
     await state.set_state(SearchMenu.choosing_method)
     await message.answer("Как вы хотите искать?", reply_markup=kb.as_markup())
     await subscribers_service.add_subscriber(message.chat.id)
-    if message.text and message.text.startswith('/start'):
+    if message.text and message.text.startswith('/search'):
             try:
                 await message.delete()
             except Exception as e:
@@ -167,16 +198,18 @@ async def available_celebs_handler(call: types.CallbackQuery, celebrity_service:
 
     celebs = await celebrity_service.get_celebrities(geo, category)
     if celebs:
-        text = "Доступные селебы:\n\n" + "\n".join(c.title() for c in celebs)
-        await call.message.answer(text)
+        text = "<b>Доступные селебы:</b>\n\n" + "\n".join(c.title() for c in celebs)
+        await call.message.answer(text, parse_mode="html")
         await call.answer()
     else:
-        await call.message.answer("Пока нет согласованных селеб по этому гео и категории. Вы можете отправить заявку модератору через команду /start")
+        await call.message.answer("Пока нет согласованных селеб по этому гео и категории. Вы можете отправить заявку модератору через команду /search")
         await call.answer()
 
-    kb = get_new_search_button()
-    await call.message.edit_reply_markup(reply_markup=kb.as_markup())
-
+    try:
+        kb = get_new_search_button()
+        await call.message.edit_reply_markup(reply_markup=kb.as_markup())
+    except TelegramBadRequest as e:
+        pass
 
 async def callback_handler(call: types.CallbackQuery, requests_service: RequestsService, celebrity_service: CelebrityService, state: FSMContext):
     handled = await handle_request_moderator(call, requests_service, celebrity_service)
@@ -224,7 +257,7 @@ async def back_handler(call: types.CallbackQuery, state: FSMContext, subscribers
         # back to main menu
         await state.clear()
         await call.message.delete()
-        return await cmd_start(call.message, state, subscribers_service)
+        return await cmd_search(call.message, state, subscribers_service)
 
     if where == "geo":
         # back to choosing geo
@@ -250,7 +283,7 @@ async def back_handler(call: types.CallbackQuery, state: FSMContext, subscribers
 
 async def new_search_handler(call: types.CallbackQuery, state: FSMContext, subscribers_service: SubscribersService):
     await call.answer()
-    return await cmd_start(call.message, state, subscribers_service)
+    return await cmd_search(call.message, state, subscribers_service)
 
 
 async def cmd_approved(message: types.Message, state: FSMContext):
