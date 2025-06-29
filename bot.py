@@ -1,18 +1,19 @@
 import asyncio
-from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery
 import config
 from aiogram import types
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, StateFilter
+from config import logger
 
 from db.celebrity_service import CelebrityService
 from db.database_manager import DatabaseManager
 from db.requests_service import RequestsService
 from db.service_middleware import ServiceMiddleware
 from db.subcribers_service import SubscribersService
+from filters import AdminModObserverFilter
 from handlers.moderator_handlers import edit_handler, field_chosen, name_edited, edit_back_button_handler, \
-    new_param_chosen, delete_celebrity_handler, delete_request_handler, cmd_requests, cmd_users
+    new_param_chosen, delete_celebrity_handler, delete_request_handler, cmd_requests, cmd_users, cmd_role, \
+    cancel_role_handler, cmd_role_receive_user_id, resume_role_changing_handler, role_chosen_handler
 from handlers.user_handlers import (
     cmd_search, cmd_start,
     callback_handler,
@@ -24,23 +25,75 @@ from handlers.user_handlers import (
     manual_handler, back_handler, new_search_handler, available_celebs_handler, cmd_approved, cancel_handler,
     approved_geo_chosen_handler, back_to_approved_handler, approved_cat_chosen_handler,
 )
-from states import EditCelebrity
+from states import EditCelebrity, EditUserRole
+
+
+def create_on_startup(dp: Dispatcher, bot: Bot):
+    async def on_startup():
+        await DatabaseManager.init()
+        pool = dp['pool']
+        dp['celebrity_service'] = CelebrityService(pool)
+        dp['requests_service'] = RequestsService(pool)
+        dp['subscribers_service'] = SubscribersService(pool)
+
+        common_commands = [
+            types.BotCommand(command="start", description="Инфо о боте"),
+            types.BotCommand(command="search", description="Новый поиск/Заявка модератору"),
+            types.BotCommand(command="approved", description="Список согласованных селеб")
+        ]
+        admin_commands = common_commands + [types.BotCommand(command="requests", description="Посмотреть активные заявки "),
+                                            types.BotCommand(command="users",
+                                                             description="Посмотреть кто подписан на бота"),
+                                            types.BotCommand(command="role", description="Редактирование роли юзера")]
+
+        mod_observer_commands = common_commands + [
+            types.BotCommand(command="requests", description="Посмотреть активные заявки")
+        ]
+        moderators = await dp['subscribers_service'].get_moderators()
+        observers = await dp['subscribers_service'].get_observers()
+        extra_users = moderators + observers
+
+        for user_id in extra_users:
+            try:
+                await bot.set_my_commands(mod_observer_commands, scope=types.BotCommandScopeChat(chat_id=user_id))
+            except Exception as e:
+                logger.warning(f"Failed to set commands for user {user_id}: {e}")
+
+        await bot.set_my_commands(admin_commands, scope=types.BotCommandScopeChat(chat_id=config.ADMIN_ID))
+        await bot.set_my_commands(common_commands)
+
+    return on_startup
+
+async def on_shutdown(dp: Dispatcher):
+    pool = dp.get('pool')
+    if pool:
+        await pool.close()
 
 
 async def main():
-    pool = await DatabaseManager.get_pool()
-
     bot = Bot(token=config.BOT_TOKEN)
     dp = Dispatcher()
+    pool = await DatabaseManager.get_pool()
     dp.update.middleware(ServiceMiddleware(pool))
+    dp['pool'] = pool
+    subscribers_service = SubscribersService(pool)
+    admin_mod_observer_filter = AdminModObserverFilter(subscribers_service)
 
     dp.message.register(cmd_start, Command("start"))
     dp.message.register(cmd_search, Command("search"))
     dp.message.register(cmd_approved, Command("approved"))
-    dp.message.register(cmd_requests, Command("requests"), F.from_user.id == config.MODERATOR_ID)
-    dp.message.register(cmd_users, Command("users"), F.from_user.id == config.MODERATOR_ID)
-    dp.message.register(lambda message: message.answer(f"❌ У вас нет прав для этой команды."),Command("requests"))
+    dp.message.register(cmd_requests, Command("requests"), admin_mod_observer_filter)
+    dp.message.register(cmd_users, Command("users"), F.from_user.id == config.ADMIN_ID)
+    dp.message.register(lambda message: message.answer(f"❌ У вас нет прав для этой команды."),Command("requests"), ~admin_mod_observer_filter)
     dp.message.register(lambda message: message.answer(f"❌ У вас нет прав для этой команды."), Command("users"))
+    dp.message.register(cmd_role, Command("role"), F.from_user.id == config.ADMIN_ID)
+    dp.message.register(lambda message: message.answer(f"❌ У вас нет прав для этой команды."), Command("role"))
+
+    dp.callback_query.register(cancel_role_handler, F.data == "cancel_role_change")
+    dp.callback_query.register(resume_role_changing_handler, F.data == "resume_role_changing")
+    dp.callback_query.register(role_chosen_handler, F.data.startswith("role_set:"), StateFilter(EditUserRole.waiting_for_role_choice))
+    dp.message.register(cmd_role_receive_user_id, StateFilter(EditUserRole.waiting_for_id))
+
 
     dp.message.register(name_entered, StateFilter(SearchMenu.entering_name))
     dp.message.register(manual_handler, StateFilter(SearchMenu.manual_entry))
@@ -68,59 +121,11 @@ async def main():
 
     dp.callback_query.register(delete_request_handler, F.data.startswith("delete:"))
 
-    async def on_startup():
-        await DatabaseManager.init()
 
-        dp['pool'] = pool
+    dp.startup.register(create_on_startup(dp, bot))
+    dp.shutdown.register(on_shutdown)
 
-        dp['celebrity_service'] = CelebrityService(pool)
-        dp['requests_service'] = RequestsService(pool)
-        dp['subscribers_service'] = SubscribersService(pool)
-
-        common_commands = [
-            types.BotCommand(command="start", description="Инфо о боте"),
-            types.BotCommand(command="search", description="Новый поиск/Заявка модератору"),
-            types.BotCommand(command="approved", description="Список согласованных селеб")
-        ]
-        mod_commands = common_commands + [types.BotCommand(command="requests", description="Посмотреть активные заявки "),
-                                          types.BotCommand(command="users", description="Посмотреть кто подписан на бота")]
-
-        await bot.set_my_commands(mod_commands, scope=types.BotCommandScopeChat(chat_id=config.MODERATOR_ID))
-        await bot.set_my_commands(common_commands)
-
-        # send message to all subscribers on update
-        # subs = await dp['subscribers_service'].get_all_subscribers()
-        # start_kb = InlineKeyboardMarkup(
-        # inline_keyboard=[
-        #         [InlineKeyboardButton(text="🚀 START", callback_data="start:from_broadcast")]
-        #     ],
-        # )
-        # for chat_id in subs:
-        #     try:
-        #         await bot.send_message(
-        #             chat_id,
-        #             "🚀 Бот обновлён до новой версии! Всё готово — нажмите START, чтобы продолжить.",
-        #             reply_markup=start_kb
-        #         )
-        #     except Exception:
-        #         pass
-
-
-    async def on_shutdown():
-        await pool.close()
-    #
-    #
-    # async def start_from_broadcast(call: CallbackQuery, state: FSMContext):
-    #     await call.answer()
-    #     await cmd_start(call.message, state, dp['subscribers_service'])
-
-
-    dp.startup.register(on_startup)
-    # dp.callback_query.register(
-    #     start_from_broadcast,
-    #     F.data == "start:from_broadcast"
-    # )
-    await dp.start_polling(bot, skip_updates=True, on_startup=on_startup, on_shutdown=on_shutdown)
+    await dp.start_polling(bot, skip_updates=True)
 
 
 if __name__ == "__main__":

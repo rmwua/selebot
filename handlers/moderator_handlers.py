@@ -7,14 +7,19 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from asyncpg import UniqueViolationError
 
-import config
+from config import logger, ADMIN_ID
 from db.celebrity_service import CelebrityService
 from db.requests_service import RequestsService
 from db.subcribers_service import SubscribersService
-from keyboards import get_new_search_button, get_edit_keyboard, get_categories_keyboard, get_geo_keyboard
-from states import EditCelebrity
+from keyboards import get_new_search_button, get_edit_keyboard, get_categories_keyboard, get_geo_keyboard, \
+    cancel_role_change_kb
+from models import USER_ROLES
+from states import EditCelebrity, EditUserRole
 from synonyms import geo_synonyms
-from utils import is_moderator, replace_param_in_text, parse_celebrity_from_msg
+from utils import is_moderator, replace_param_in_text, parse_celebrity_from_msg, set_subscriber_username
+
+
+PENDING_MESSAGES = {}
 
 
 async def edit_handler(call: CallbackQuery, state: FSMContext):
@@ -115,9 +120,9 @@ async def name_edited(message: Message, state: FSMContext, celebrity_service: Ce
         celeb_data["name"] = name_input.lower()
         await state.update_data(celebrity=celeb_data, orig_message_text=orig_msg_new_text)
     except UniqueViolationError as e:
-        pass
+        logger.error(e)
     except Exception as e:
-        pass
+        logger.error(e)
 
     await message.delete()
     await show_edit_menu(message.bot, message.chat.id, state)
@@ -162,7 +167,7 @@ async def new_param_chosen(call: CallbackQuery, state: FSMContext, celebrity_ser
 
         await state.update_data(celebrity=celeb_data,orig_message_text=orig_msg_new_text)
     except UniqueViolationError as e:
-        pass
+        logger.error(e)
 
     await call.bot.delete_message(message_id=editing_param_msg_id, chat_id=call.message.chat.id)
     await show_edit_menu(call.message.bot, call.message.chat.id, state)
@@ -182,6 +187,7 @@ async def delete_celebrity_handler(call: CallbackQuery, state: FSMContext, celeb
         await celebrity_service.delete_celebrity(**celeb_data)
     except Exception as e:
         await call.message.answer("Ошибка при удалении записи")
+        logger.error("Error deleting celebrity: ", e)
     else:
         new_search_b = get_new_search_button()
         await call.message.answer("Запись удалена", reply_markup=new_search_b.as_markup())
@@ -233,10 +239,24 @@ async def delete_request_handler(call: CallbackQuery, requests_service: Requests
     await call.answer(text="Заявка удалена")
 
 
-async def send_request_to_moderator(name_input: str, category: str, geo: str, prompt_id: int, username:str, message: Message, requests_service: RequestsService):
+async def send_request_to_moderator(name_input: str, category: str, geo: str, prompt_id: int, username:str, message: Message, requests_service: RequestsService, subscribers_service: SubscribersService):
+    moderators = await subscribers_service.get_moderators()
+    observers = await subscribers_service.get_observers()
+    moderators.append(ADMIN_ID)
+    msg_ids = []
+
     request_id = await requests_service.add_pending_request(
         message.from_user.id, message.chat.id, message.message_id,
         name_input, category, geo, prompt_id, username
+    )
+
+    text = (
+        f"<b>Новая заявка:</b>\n\n"
+        f"Имя: {name_input.title()}\n"
+        f"Категория: {category.title()}\n"
+        f"Гео: {geo.title()}\n"
+        f"Номер Заявки: {request_id}\n"
+        f"Юзер: @{username}"
     )
 
     builder = InlineKeyboardBuilder()
@@ -244,12 +264,32 @@ async def send_request_to_moderator(name_input: str, category: str, geo: str, pr
     builder.button(text="⛔ Забанить", callback_data=f"ban:{request_id}")
     builder.adjust(2)
 
-    await message.bot.send_message(
-        config.MODERATOR_ID,
-        f"<b>Новая заявка:</b>\n\nИмя: {name_input.title()}\nКатегория: {category.title()}\nГео: {geo.title()}\nНомер Заявки: {request_id}\nЮзер: @{username}",
-        reply_markup=builder.as_markup(),
-        parse_mode="HTML"
-    )
+    for mod_id in moderators:
+        try:
+            msg = await message.bot.send_message(
+                chat_id=mod_id,
+                text=text,
+                reply_markup=builder.as_markup(),
+                parse_mode="HTML"
+            )
+            msg_ids.append({"chat_id": mod_id, "message_id": msg.message_id})
+
+        except Exception as e:
+            logger.warning("Failed to send message to moderator", exc_info=e)
+
+    for ob_id in observers:
+        try:
+            msg = await message.bot.send_message(
+                chat_id=ob_id,
+                text=text,
+                parse_mode="HTML"
+            )
+            msg_ids.append({"chat_id": ob_id, "message_id": msg.message_id})
+
+        except Exception as e:
+            logger.warning("Failed to send message to observer", exc_info=e)
+
+    PENDING_MESSAGES[request_id] = msg_ids
 
     return request_id
 
@@ -260,7 +300,9 @@ async def handle_request_moderator(call, requests_service: RequestsService, cele
 
     pending = await requests_service.pop_pending_request(int(req_id))
     if not pending:
-        return await call.answer("Заявка не найдена или уже обработана", show_alert=True)
+        await call.answer("Заявка не найдена или уже обработана", show_alert=True)
+        await call.message.delete()
+        return
 
     chat_id = pending.get("chat_id")
     message_id = pending.get("message_id")
@@ -275,13 +317,25 @@ async def handle_request_moderator(call, requests_service: RequestsService, cele
     handled = await celebrity_service.insert_celebrity(name, category, geo, status)
     handled.update({"chat_id": chat_id, "message_id": message_id, "prompt_id": prompt_id})
 
+    message_ids = PENDING_MESSAGES.get(int(req_id), [])
+    for msg_info in message_ids:
+        try:
+            await call.bot.edit_message_text(
+                chat_id=msg_info["chat_id"],
+                message_id=msg_info["message_id"],
+                text=f"<b>Заявка обработана:</b>\n\n"
+                     f"Имя: {name.title()}\n"
+                     f"Категория: {category.title()}\n"
+                     f"Гео: {geo.title()}\n"
+                     f"Статус: {status.title()}\n"
+                     f"Номер Заявки: {req_id}\nЮзер: @{username}",
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            logger.warning(f"Failed to edit request message {msg_info}", exc_info=e)
 
-    await call.bot.send_message(
-        config.MODERATOR_ID,
-        f"Заявка #{req_id} для @{username} на {name.title()} обработана: {status}"
-    )
-
-    await call.message.delete()
+    if int(req_id) in PENDING_MESSAGES:
+        del PENDING_MESSAGES[int(req_id)]
 
     return handled
 
@@ -295,15 +349,135 @@ async def cmd_users(message: Message, subscribers_service: SubscribersService, b
         chat_id = user.get("chat_id")
         if not username:
             try:
-                tg_user = await bot.get_chat(chat_id)
-                username = tg_user.username
-                if username:
-                    await subscribers_service.add_subscriber(chat_id, username)
+                username = await set_subscriber_username(chat_id, bot, subscribers_service)
             except Exception:
                 username = None
-        updated_users.append("@" + username if username else chat_id)
+        updated_users.append(f"@{username} ID: {chat_id}" if username else f"ID: {chat_id}")
 
     if not updated_users:
         await message.answer("Юзеры недоступны")
     else:
-        await message.answer("/n".join(updated_users))
+        await message.answer("\n".join(updated_users))
+
+
+async def cmd_role(message: Message, state: FSMContext):
+    await state.clear()
+    await message.delete()
+    await state.set_state(EditUserRole.waiting_for_id)
+    kb = cancel_role_change_kb()
+    msg = await message.answer("Введите ID пользователя, которому хотите поменять роль:", reply_markup=kb.as_markup())
+    await state.update_data(bot_message_id=msg.message_id)
+
+
+async def cancel_role_handler(call: CallbackQuery, state: FSMContext):
+    await call.message.delete()
+    await state.clear()
+    await call.answer()
+
+
+async def cmd_role_receive_user_id(message: Message, state: FSMContext, subscribers_service: SubscribersService, bot: Bot):
+    data = await state.get_data()
+    bot_msg_id = data["bot_message_id"]
+    chat_id = message.chat.id
+
+    try:
+        await message.bot.delete_message(chat_id=chat_id, message_id=bot_msg_id)
+    except TelegramBadRequest:
+        pass
+
+    user_id_str = message.text.strip()
+
+    if not user_id_str.isdigit():
+        kb = cancel_role_change_kb()
+        await message.answer("ID должен быть числом, попробуйте еще раз.")
+        await message.answer("Введите ID пользователя, которому хотите поменять роль:", reply_markup=kb.as_markup())
+        await state.set_state(EditUserRole.waiting_for_id)
+        await message.delete()
+        return
+
+    user_id = int(user_id_str)
+    user = await subscribers_service.get_user(user_id)
+    await state.update_data(user_id=user_id)
+
+    if not user:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="Да", callback_data="resume_role_changing")
+        kb.button(text="❌Отмена", callback_data="cancel_role_change")
+        await message.answer(
+            f"Пользователь с ID {user_id} не найден в базе.\n"
+            "Вы хотите продолжить и назначить роль на этот ID?",
+            reply_markup=kb.as_markup()
+        )
+        await message.delete()
+        return
+
+    username = user.get("username")
+    if not username:
+        try:
+            username = await set_subscriber_username(user_id, bot, subscribers_service)
+        except Exception:
+            username = None
+
+    await message.answer("Пользователь найден:\n"
+                         f"ID: {user.get('chat_id')}\n"
+                         f"username: {username}\n"
+                         f"Role: {user.get('role').capitalize()}\n")
+    await send_role_selection(state, chat_id, message.bot, user_id)
+    await message.delete()
+
+
+async def send_role_selection(state: FSMContext, chat_id: int, bot: Bot, user_id: int):
+    await state.set_state(EditUserRole.waiting_for_role_choice)
+    kb = InlineKeyboardBuilder()
+
+    for role in USER_ROLES:
+        if role.lower() == "admin":
+            continue
+        kb.button(text=role.capitalize(), callback_data=f"role_set:{user_id}:{role}")
+
+    kb.button(text="❌Отмена", callback_data="cancel_role_change")
+    kb.adjust(2)
+
+    await bot.send_message(chat_id=chat_id, text="Выберите новую роль:", reply_markup=kb.as_markup())
+
+
+async def resume_role_changing_handler(call: CallbackQuery, state: FSMContext, subscribers_service: SubscribersService):
+    await call.answer()
+    await call.message.delete()
+    data = await state.get_data()
+    user_id = data["user_id"]
+
+    if not user_id:
+        await call.answer("Что-то пошло не так. Пожалуйста, повторите ввод ID.")
+        await state.clear()
+
+        kb = cancel_role_change_kb()
+        await call.message.answer("Введите ID пользователя, которому хотите поменять роль:", reply_markup=kb.as_markup())
+        await state.set_state(EditUserRole.waiting_for_id)
+        return
+
+    user = await subscribers_service.add_subscriber(user_id)
+    if not user:
+        await call.message.answer("Что-то пошло не так. Ошибка добавления пользователя")
+        await state.clear()
+        return
+
+    await call.message.answer("Пользователь добавлен в БД")
+    await send_role_selection(state, call.message.chat.id, call.bot, user_id)
+
+
+async def role_chosen_handler(call: CallbackQuery, state: FSMContext, subscribers_service: SubscribersService):
+    await call.answer()
+    _, user_id_str, new_role = call.data.split(":")
+
+    user_id = int(user_id_str)
+
+    success = await subscribers_service.update_role(user_id, new_role)
+    if not success:
+        await call.message.answer("Ошибка обновления роли")
+        await state.clear()
+        return
+
+    await call.message.answer(f"Роль пользователя {user_id} успешно изменена на {new_role.capitalize()}")
+    await state.clear()
+    await call.message.delete()

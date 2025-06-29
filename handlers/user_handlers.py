@@ -30,12 +30,10 @@ async def cmd_start(message: types.Message, subscribers_service: SubscribersServ
 
     async def reset_flag():
         await asyncio.sleep(2)
-        await state.update_data(started=False)
+        await state.clear()
+
     asyncio.create_task(reset_flag())
-
     await state.update_data(started=True)
-
-
     await subscribers_service.add_subscriber(message.chat.id, message.from_user.username)
 
     await message.answer(text="👋 Привет! Я — бот для поиска и согласования селеб."
@@ -45,7 +43,7 @@ async def cmd_start(message: types.Message, subscribers_service: SubscribersServ
                               "\n\n✅ Также вы можете посмотреть список согласованных селеб командой /approved")
 
 
-async def cmd_search(message: types.Message, state: FSMContext, subscribers_service: SubscribersService):
+async def cmd_search(message: types.Message, state: FSMContext):
     kb = InlineKeyboardBuilder()
     kb.button(text="🔎 По меню", callback_data="mode:menu")
     kb.button(text="✍️ Ручной ввод", callback_data="mode:manual")
@@ -107,16 +105,16 @@ async def cat_chosen(call: types.CallbackQuery, state: FSMContext):
     await call.answer()
 
 
-async def name_entered(message: types.Message, state: FSMContext, celebrity_service: CelebrityService, requests_service: RequestsService):
+async def name_entered(message: types.Message, state: FSMContext, celebrity_service: CelebrityService, requests_service: RequestsService, subscribers_service: SubscribersService):
     data = await state.get_data()
     name_input = message.text.strip().lower()
     geo  = data['geo']
     cat  = data['category']
 
-    await handle_request(name_input, cat, geo, message, state, celebrity_service, requests_service)
+    await handle_request(name_input, cat, geo, message, state, celebrity_service, requests_service, subscribers_service)
 
 
-async def manual_handler(message: types.Message, state: FSMContext, celebrity_service: CelebrityService, requests_service: RequestsService):
+async def manual_handler(message: types.Message, state: FSMContext, celebrity_service: CelebrityService, requests_service: RequestsService, subscribers_service: SubscribersService):
     text = message.text.strip()
     parts = [p.strip() for p in text.split(",")]
     if len(parts) < 3:
@@ -135,10 +133,10 @@ async def manual_handler(message: types.Message, state: FSMContext, celebrity_se
     if geo is None:
         return await message.answer("Знаменитость не согласована. Данного гео пока нет.", reply_markup=new_search_b.as_markup())
 
-    await handle_request(name_input, category, geo, message, state, celebrity_service, requests_service)
+    await handle_request(name_input, category, geo, message, state, celebrity_service, requests_service, subscribers_service)
 
 
-async def handle_request(name_input: str, category: str, geo: str, message: types.Message, state: FSMContext, celebrity_service: CelebrityService, requests_service: RequestsService):
+async def handle_request(name_input: str, category: str, geo: str, message: types.Message, state: FSMContext, celebrity_service: CelebrityService, requests_service: RequestsService, subscribers_service: SubscribersService):
     data = await state.get_data()
     prompt_id = data.get('prompt_message_id')
     chat_id = message.chat.id
@@ -178,7 +176,7 @@ async def handle_request(name_input: str, category: str, geo: str, message: type
         )
         await message.bot.delete_message(chat_id=chat_id, message_id=prompt_id)
     else:
-        request_id = await send_request_to_moderator(name_input, category, geo, prompt_id, username, message, requests_service)
+        request_id = await send_request_to_moderator(name_input, category, geo, prompt_id, username, message, requests_service, subscribers_service)
 
         text = f"Ваш запрос в обработке, ожидайте ответа модератора. Номер заявки: {request_id}"
 
@@ -213,6 +211,8 @@ async def available_celebs_handler(call: types.CallbackQuery, celebrity_service:
 
 async def callback_handler(call: types.CallbackQuery, requests_service: RequestsService, celebrity_service: CelebrityService, state: FSMContext):
     handled = await handle_request_moderator(call, requests_service, celebrity_service)
+    if not isinstance(handled, dict):
+        return
 
     name     = handled["name"]
     category = handled["category"]
@@ -249,7 +249,7 @@ async def callback_handler(call: types.CallbackQuery, requests_service: Requests
     await call.bot.delete_message(chat_id=chat_id, message_id=prompt_id)
 
 
-async def back_handler(call: types.CallbackQuery, state: FSMContext, subscribers_service: SubscribersService):
+async def back_handler(call: types.CallbackQuery, state: FSMContext):
     where = call.data.split(":", 1)[1]
     await call.answer()
 
@@ -257,7 +257,7 @@ async def back_handler(call: types.CallbackQuery, state: FSMContext, subscribers
         # back to main menu
         await state.clear()
         await call.message.delete()
-        return await cmd_search(call.message, state, subscribers_service)
+        return await cmd_search(call.message, state)
 
     if where == "geo":
         # back to choosing geo
@@ -281,9 +281,9 @@ async def back_handler(call: types.CallbackQuery, state: FSMContext, subscribers
         )
 
 
-async def new_search_handler(call: types.CallbackQuery, state: FSMContext, subscribers_service: SubscribersService):
+async def new_search_handler(call: types.CallbackQuery, state: FSMContext):
     await call.answer()
-    return await cmd_search(call.message, state, subscribers_service)
+    return await cmd_search(call.message, state)
 
 
 async def cmd_approved(message: types.Message, state: FSMContext):

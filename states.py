@@ -18,3 +18,8 @@ class EditCelebrity(StatesGroup):
     editing_name = State()
     editing_param = State()
     deleting_entry = State()
+
+
+class EditUserRole(StatesGroup):
+    waiting_for_id = State()
+    waiting_for_role_choice = State()

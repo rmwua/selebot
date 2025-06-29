@@ -1,9 +1,13 @@
 from sqlalchemy import (
     MetaData, Table, Column, Integer, Text, String,
-    BigInteger, TIMESTAMP, func, Index, UniqueConstraint
+    BigInteger, TIMESTAMP, func, Index, UniqueConstraint, Enum
 )
 
 metadata = MetaData()
+
+USER_ROLES = ('admin', 'moderator', 'observer', 'user')
+USER_ROLE_ENUM = Enum(*USER_ROLES, name="userrole")
+
 
 celebrities = Table(
     "celebrities", metadata,
@@ -37,4 +41,5 @@ subscribers = Table(
     "subscribers", metadata,
     Column("chat_id", BigInteger, primary_key=True),
     Column("username", String, nullable=True),
+    Column("role", USER_ROLE_ENUM, nullable=False, server_default="user"),
 )

@@ -46,3 +46,9 @@ def get_edit_keyboard():
     kb.button(text="✅Готово", callback_data="edit_field:back")
     kb.adjust(2)
     return kb
+
+
+def cancel_role_change_kb():
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌Отмена", callback_data="cancel_role_change")
+    return kb

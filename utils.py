@@ -1,13 +1,15 @@
 import re
 
+from aiogram import Bot
 from transliterate import translit
 import unidecode
 
 import config
+from db.subcribers_service import SubscribersService
 
 
 def is_moderator(user_id: int) -> bool:
-    return user_id == config.MODERATOR_ID
+    return user_id == config.ADMIN_ID
 
 
 def replace_param_in_text(text: str, new_name:str=None, new_geo:str=None, new_status:str=None, new_cat:str=None) -> str:
@@ -58,3 +60,17 @@ def sanitize_ascii(text: str) -> str:
     return re.sub(r"[^\w\s]", "", unidecode.unidecode(text), flags=re.UNICODE).strip().lower()
 
 
+async def set_subscriber_username(chat_id: int , bot: Bot, subscribers_service: SubscribersService) -> str | None:
+    tg_user = await bot.get_chat(chat_id)
+    username = tg_user.username
+    if username:
+        await subscribers_service.add_subscriber(chat_id, username)
+    return username
+
+
+async def is_admin_or_moderator_or_observer(user_id: int, subscribers_service) -> bool:
+    if user_id == config.ADMIN_ID:
+        return True
+    moderators = await subscribers_service.get_moderators()
+    observers = await subscribers_service.get_observers()
+    return user_id in moderators or user_id in observers
