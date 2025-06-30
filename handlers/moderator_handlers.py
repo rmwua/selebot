@@ -210,12 +210,18 @@ async def edit_back_button_handler(call: CallbackQuery, state: FSMContext):
         return
 
 
-async def cmd_requests(message: Message, requests_service: RequestsService):
+async def cmd_requests(message: Message, requests_service: RequestsService, subscribers_service: SubscribersService):
     await message.delete()
+
     requests = await requests_service.get_all_pending_requests()
     if not requests:
         await message.answer("Активных заявок нет.")
         return
+
+    moderators = await subscribers_service.get_moderators()
+    observers = await subscribers_service.get_observers()
+    moderators.append(ADMIN_ID)
+    msg_ids = []
 
     for request in requests:
         request_id, name, cat, geo, username = request[:5]
@@ -225,11 +231,37 @@ async def cmd_requests(message: Message, requests_service: RequestsService):
         builder.button(text="🗑 Удалить заявку", callback_data=f"delete:{request_id}")
         builder.adjust(2, 1)
 
-        await message.answer(
-            f"<b>Необработанная заявка:</b>\nИмя: {name.title()}\nКатегория: {cat.title()}\nГео: {geo.title()}\nНомер Заявки: {request_id}\nЮзер: {'@'+username if username else ''}",
-            reply_markup=builder.as_markup(),
-            parse_mode="HTML",
-        )
+        text = f"<b>Необработанная заявка:</b>\n"\
+                f"Имя: {name.title()}\n"\
+                f"Категория: {cat.title()}\n"\
+                f"Гео: {geo.title()}\n"\
+                f"Номер Заявки: {request_id}\n"\
+                f"Юзер: {'@'+username if username else ''}"
+
+        for mod_id in moderators:
+            try:
+                msg = await message.bot.send_message(
+                    chat_id=mod_id,
+                    text=text,
+                    reply_markup=builder.as_markup(),
+                    parse_mode="HTML"
+                )
+                msg_ids.append({"chat_id": mod_id, "message_id": msg.message_id})
+
+            except Exception as e:
+                logger.warning("Failed to send message to moderator", exc_info=e)
+
+        for ob_id in observers:
+            try:
+                msg = await message.bot.send_message(
+                    chat_id=ob_id,
+                    text=text,
+                    parse_mode="HTML"
+                )
+                msg_ids.append({"chat_id": ob_id, "message_id": msg.message_id})
+
+            except Exception as e:
+                logger.warning("Failed to send message to observer", exc_info=e)
 
 
 async def delete_request_handler(call: CallbackQuery, requests_service: RequestsService):

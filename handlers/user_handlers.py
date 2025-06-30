@@ -44,6 +44,7 @@ async def cmd_start(message: types.Message, subscribers_service: SubscribersServ
 
 
 async def cmd_search(message: types.Message, state: FSMContext):
+    await state.clear()
     kb = InlineKeyboardBuilder()
     kb.button(text="🔎 По меню", callback_data="mode:menu")
     kb.button(text="✍️ Ручной ввод", callback_data="mode:manual")
