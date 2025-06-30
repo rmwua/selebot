@@ -328,7 +328,8 @@ async def handle_request_moderator(call, requests_service: RequestsService, cele
                      f"Категория: {category.title()}\n"
                      f"Гео: {geo.title()}\n"
                      f"Статус: {status.title()}\n"
-                     f"Номер Заявки: {req_id}\nЮзер: @{username}",
+                     f"Номер Заявки: {req_id}\nЮзер: @{username}\n"
+                     f"<b>Статус и данные по селебе занесены в БД</b>",
                 parse_mode="HTML",
             )
         except Exception as e:
