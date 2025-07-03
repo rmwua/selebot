@@ -30,7 +30,6 @@ from states import EditCelebrity, EditUserRole
 
 def create_on_startup(dp: Dispatcher, bot: Bot):
     async def on_startup():
-        await DatabaseManager.init()
         pool = dp['pool']
         dp['celebrity_service'] = CelebrityService(pool)
         dp['requests_service'] = RequestsService(pool)
@@ -65,14 +64,14 @@ def create_on_startup(dp: Dispatcher, bot: Bot):
     return on_startup
 
 async def on_shutdown(dp: Dispatcher):
-    pool = dp.get('pool')
-    if pool:
-        await pool.close()
+    await DatabaseManager.close()
 
 
 async def main():
     bot = Bot(token=config.BOT_TOKEN)
     dp = Dispatcher()
+
+    await DatabaseManager.init()
     pool = await DatabaseManager.get_pool()
     dp.update.middleware(ServiceMiddleware(pool))
     dp['pool'] = pool

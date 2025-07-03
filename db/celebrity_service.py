@@ -1,4 +1,5 @@
-from config import logger
+from typing import Dict, Any
+
 from utils import sanitize_cyr, sanitize_ascii
 
 
@@ -93,7 +94,7 @@ class CelebrityService:
                   SET status          = EXCLUDED.status,
                       normalized_name = EXCLUDED.normalized_name,
                       ascii_name      = EXCLUDED.ascii_name
-                RETURNING name, category, geo, status;
+                RETURNING id, name, category, geo, status;
                 """,
                 name, cyr_name, ascii_val, category, geo, status
             )
@@ -125,7 +126,7 @@ class CelebrityService:
 
 
     async def update_celebrity(self, name: str, geo: str, category: str, status: str, new_name=None, new_geo=None,
-                               new_cat=None, new_status=None) -> None:
+                               new_cat=None, new_status=None) -> dict[Any, Any]:
         updates = {}
         if new_name:
             updates["name"] = new_name.lower()
@@ -156,13 +157,15 @@ class CelebrityService:
         query = f"""
             UPDATE celebrities
             SET {set_sql}
-            WHERE {where_sql};
+            WHERE {where_sql}
+            RETURNING id, name, category, geo, status;
         """
 
         params = set_values + where_values
 
         async with self.pool.acquire() as conn:
-            await conn.execute(query, *params)
+            row = await conn.fetchrow(query, *params)
+            return dict(row)
 
     async def delete_celebrity(self, name: str, geo: str, category: str, status: str) -> None:
 
@@ -174,3 +177,29 @@ class CelebrityService:
         params = [name, category, geo]
         async with self.pool.acquire() as conn:
             await conn.execute(query, *params)
+
+    async def update_by_id(self, rec_id: int, *, name: str, category: str, geo: str, status: str) -> dict:
+        """
+        Обновляет запись по её id. Пересчитывает normalized_name и ascii_name.
+        """
+        ascii_val = sanitize_ascii(name)
+        cyr_name  = sanitize_cyr(name)
+
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                UPDATE celebrities
+                   SET name            = $2,
+                       normalized_name = $3,
+                       ascii_name      = $4,
+                       category        = $5,
+                       geo             = $6,
+                       status          = $7
+                 WHERE id = $1
+                RETURNING id, name, category, geo, status;
+                """,
+                rec_id, name, cyr_name, ascii_val, category, geo, status
+            )
+            if not row:
+                raise ValueError(f"No celebrity with id={rec_id}")
+            return dict(row)

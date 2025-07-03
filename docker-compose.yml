@@ -1,16 +1,4 @@
 services:
-  bot:
-    build: .
-    env_file: .env
-    depends_on:
-      - db
-    volumes:
-      - .:/app
-    command: >
-        sh -c "python scripts/import_csv.py && python -u bot.py"
-    environment:
-      DATABASE_URL: postgresql://celebot_admin:meow-password@db:5432/celebrity_db
-
   db:
     image: postgres:14
     container_name: celebot_db
@@ -22,5 +10,34 @@ services:
       - data:/var/lib/postgresql/data
     ports:
       - "5433:5432"
+
+  api:
+    build: .
+    container_name: celebot_api
+    env_file: .env
+    depends_on:
+      - db
+    volumes:
+      - .:/app
+    # Перенаправляем БД на контейнер db
+    environment:
+      - DATABASE_URL=postgresql://celebot_admin:meow-password@db:5432/celebrity_db
+    command: python app.py
+    ports:
+      - "8000:8000"
+
+  bot:
+    build: .
+    container_name: celebot_bot
+    env_file: .env
+    depends_on:
+      - db
+      - api
+    volumes:
+      - .:/app
+    environment:
+      - DATABASE_URL=postgresql://celebot_admin:meow-password@db:5432/celebrity_db
+    command: python -u bot.py
+
 volumes:
-    data:
+  data:

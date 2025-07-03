@@ -11,8 +11,11 @@ ls -l
 alembic current
 alembic upgrade head
 
-echo "Importing CSV data..."
-python scripts/import_csv.py
+echo ">>> Exporting Postgres → Google Sheets"
+python sheets_sync.py
+
+echo ">>> Starting flask endpoint..."
+gunicorn app:app --bind 0.0.0.0:8000 &
 
 echo "Starting the bot..."
 python bot.py

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 import os
 import pandas as pd
 from unidecode import unidecode
@@ -7,13 +6,23 @@ from dotenv import load_dotenv
 
 load_dotenv()
 engine = create_engine(os.getenv("DATABASE_URL"))
-df = pd.read_csv("celebrities_clean.csv").rename(columns={
-    "Имя": "name", "Категория": "category",
-    "Гео": "geo", "Статус": "status"
-}).applymap(str).applymap(str.lower)
+df = (
+    pd.read_csv("celebrities_clean.csv", dtype=str)
+      .rename(columns={
+          "Имя":      "name",
+          "Категория":"category",
+          "Гео":      "geo",
+          "Статус":   "status"
+       })
+      .fillna("")
+      .apply(lambda col: col.str.lower())
+)
 
 # статус
 df.loc[df["status"] == "черный список", "status"] = "нельзя использовать"
+df.loc[df["category"] == "вальгус", "category"] = "суставы"
+df.loc[df["category"] == "красота/омоложение", "category"] = "омоложение"
+df.loc[df["category"] == "красота", "category"] = "омоложение"
 
 with engine.begin() as conn:
     # вставляем / обновляем все поля, включая ascii_name
@@ -29,10 +38,7 @@ with engine.begin() as conn:
            :status
           )
         ON CONFLICT (name, category, geo)
-        DO UPDATE SET
-          status         = EXCLUDED.status,
-          normalized_name= EXCLUDED.normalized_name,
-          ascii_name     = EXCLUDED.ascii_name;
+        DO NOTHING
     """)
     for _, row in df.iterrows():
         conn.execute(insert, {

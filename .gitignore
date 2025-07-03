@@ -197,3 +197,4 @@ cython_debug/
 .idea/celebot.iml
 .idea/misc.xml
 .idea/
+.keys/

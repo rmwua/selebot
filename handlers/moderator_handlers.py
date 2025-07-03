@@ -14,6 +14,7 @@ from db.subcribers_service import SubscribersService
 from keyboards import get_new_search_button, get_edit_keyboard, get_categories_keyboard, get_geo_keyboard, \
     cancel_role_change_kb
 from models import USER_ROLES
+from sheets_client import push_row
 from states import EditCelebrity, EditUserRole
 from synonyms import geo_synonyms
 from utils import is_moderator, replace_param_in_text, parse_celebrity_from_msg, set_subscriber_username
@@ -116,7 +117,9 @@ async def name_edited(message: Message, state: FSMContext, celebrity_service: Ce
     await message.bot.edit_message_text(text=orig_msg_new_text, chat_id=message.chat.id, message_id=orig_message_id)
 
     try:
-        await celebrity_service.update_celebrity(**celeb_data, new_name=name_input.lower())
+        updated = await celebrity_service.update_celebrity(**celeb_data, new_name=name_input.lower())
+        push_row(updated)
+
         celeb_data["name"] = name_input.lower()
         await state.update_data(celebrity=celeb_data, orig_message_text=orig_msg_new_text)
     except UniqueViolationError as e:
@@ -156,7 +159,9 @@ async def new_param_chosen(call: CallbackQuery, state: FSMContext, celebrity_ser
         pass
 
     try:
-        await celebrity_service.update_celebrity(**celeb_data, **{param_to_use: new_value})
+        updated = await celebrity_service.update_celebrity(**celeb_data, **{param_to_use: new_value})
+        push_row(updated)
+
         if param_to_use == "new_geo":
             celeb_data["geo"] = new_value
         if param_to_use == "new_status":
@@ -348,6 +353,8 @@ async def handle_request_moderator(call, requests_service: RequestsService, cele
     name, category, geo, status = map(lambda x: x.lower() if x else '', (name, category, geo, status))
     handled = await celebrity_service.insert_celebrity(name, category, geo, status)
     handled.update({"chat_id": chat_id, "message_id": message_id, "prompt_id": prompt_id})
+
+    push_row(handled)
 
     message_ids = PENDING_MESSAGES.get(int(req_id), [])
     for msg_info in message_ids:
