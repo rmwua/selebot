@@ -21,8 +21,8 @@ alembic upgrade head
 #echo ">>> Exporting Postgres → Google Sheets"
 #python sheets_sync.py
 
-echo ">>> Starting flask endpoint..."
-gunicorn app:app --bind 0.0.0.0:${PORT:-8000}
+echo ">>> Starting flask endpoint on port $PORT..."
+gunicorn app:app --bind 0.0.0.0:$PORT &
 
 echo "Starting the bot..."
 python bot.py
