@@ -22,7 +22,7 @@ alembic upgrade head
 #python sheets_sync.py
 
 echo ">>> Starting flask endpoint..."
-gunicorn app:app --bind 0.0.0.0:8000 &
+gunicorn app:app --bind 0.0.0.0:${PORT:-8000}
 
 echo "Starting the bot..."
 python bot.py
