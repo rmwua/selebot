@@ -1,5 +1,6 @@
 import os
 import asyncio
+import traceback
 from flask import Flask, request, abort, jsonify
 
 from config import logger
@@ -22,66 +23,66 @@ service = CelebrityService(pool)
 
 @app.route("/sheet-webhook", methods=["POST"])
 def sheet_webhook():
-    # Проверяем заголовок токена
-    if request.headers.get("X-Webhook-Token") != SHEET_WEBHOOK_SECRET:
-        abort(403)
-
-    data = request.get_json(silent=True) or {}
-
-    # Берём номер строки, если он был передан из Apps Script
-    sheet_row = data.get("_row")
     try:
-        sheet_row = int(sheet_row) if sheet_row is not None else None
-    except (TypeError, ValueError):
-        sheet_row = None
+        # 1) Проверка токена
+        if request.headers.get("X-Webhook-Token") != SHEET_WEBHOOK_SECRET:
+            abort(403)
 
-    # Пытаемся разобрать id
-    raw_id = data.get("id")
-    try:
-        rec_id = int(raw_id)
-    except (TypeError, ValueError):
-        rec_id = None
+        data = request.get_json(silent=True) or {}
 
-    # Читаем оригинальный текст, затем для БД приводим к lower()
-    name_orig = data.get("name", "").strip()
-    geo_orig  = data.get("geo",  "").strip()
+        # 2) Парсим строку
+        sheet_row = data.get("_row")
+        try:
+            sheet_row = int(sheet_row) if sheet_row is not None else None
+        except (TypeError, ValueError):
+            sheet_row = None
 
-    name     = name_orig.lower()
-    category = data.get("category", "").strip().lower()
-    geo      = geo_orig.lower()
-    status   = data.get("status",   "").strip().lower()
+        raw_id = data.get("id")
+        try:
+            rec_id = int(raw_id)
+        except (TypeError, ValueError):
+            rec_id = None
 
-    if not all([name, category, geo, status]):
-        abort(400, "Missing fields")
+        # 3) Читаем и нормализуем поля
+        name_orig = data.get("name", "").strip()
+        geo_orig  = data.get("geo",  "").strip()
 
-    # Выполняем insert или update в БД
-    if rec_id:
-        updated = loop.run_until_complete(
-            service.update_by_id(
-                rec_id,
-                name=name,
-                category=category,
-                geo=geo,
-                status=status
+        name     = name_orig.lower()
+        category = data.get("category", "").strip().lower()
+        geo      = geo_orig.lower()
+        status   = data.get("status",   "").strip().lower()
+
+        if not all([name, category, geo, status]):
+            abort(400, "Missing fields")
+
+        # 4) Вставка или обновление в БД
+        if rec_id:
+            updated = loop.run_until_complete(
+                service.update_by_id(
+                    rec_id,
+                    name=name,
+                    category=category,
+                    geo=geo,
+                    status=status
+                )
             )
-        )
-    else:
-        updated = loop.run_until_complete(
-            service.insert_celebrity(
-                name=name,
-                category=category,
-                geo=geo,
-                status=status
+        else:
+            updated = loop.run_until_complete(
+                service.insert_celebrity(
+                    name=name,
+                    category=category,
+                    geo=geo,
+                    status=status
+                )
             )
-        )
 
-    # Пушим данные обратно в таблицу, в ту же строку
-    try:
+        # 5) Пушим обратно в Google Sheets
         push_row(updated, sheet_row)
-    except Exception as e:
-        logger.error(f"Sheets sync failed: {e}")
+        return jsonify({"ok": True})
 
-    return jsonify({"ok": True})
+    except Exception as e:
+        logger.error("Error in /sheet-webhook:\n" + traceback.format_exc())
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 if __name__ == "__main__":
