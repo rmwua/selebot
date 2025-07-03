@@ -17,7 +17,7 @@ class CelebrityService:
             # 1) exact
             row = await conn.fetchrow(
                 """
-                SELECT name, category, geo, status
+                SELECT id, name, category, geo, status
                   FROM celebrities
                  WHERE lower(category) = $1
                    AND lower(geo)      = $2
@@ -34,7 +34,7 @@ class CelebrityService:
             # 2) substring
             row = await conn.fetchrow(
                 """
-                SELECT name, category, geo, status
+                SELECT id, name, category, geo, status
                   FROM celebrities
                  WHERE lower(category) = $1
                    AND lower(geo)      = $2
@@ -52,7 +52,7 @@ class CelebrityService:
             # 3) fuzzy via pg_trgm
             row = await conn.fetchrow(
                 """
-                SELECT name, category, geo, status
+                SELECT id, name, category, geo, status
                   FROM celebrities
                  WHERE category= $1
                    AND geo      = $2
@@ -203,3 +203,7 @@ class CelebrityService:
             if not row:
                 raise ValueError(f"No celebrity with id={rec_id}")
             return dict(row)
+
+    async def delete_by_id(self, rec_id: int) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute("DELETE FROM celebrities WHERE id = $1", rec_id)

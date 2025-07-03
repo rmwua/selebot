@@ -14,7 +14,7 @@ from db.subcribers_service import SubscribersService
 from keyboards import get_new_search_button, get_edit_keyboard, get_categories_keyboard, get_geo_keyboard, \
     cancel_role_change_kb
 from models import USER_ROLES
-from sheets_client import push_row
+from sheets_client import push_row, delete_row_by_id
 from states import EditCelebrity, EditUserRole
 from synonyms import geo_synonyms
 from utils import is_moderator, replace_param_in_text, parse_celebrity_from_msg, set_subscriber_username
@@ -181,6 +181,7 @@ async def new_param_chosen(call: CallbackQuery, state: FSMContext, celebrity_ser
 async def delete_celebrity_handler(call: CallbackQuery, state: FSMContext, celebrity_service: CelebrityService):
     await call.answer()
     data = await state.get_data()
+    celeb_id = data.get("celeb_id")
     celeb_data = data.get("celebrity")
     orig_message_id = data.get("orig_message_id")
     status = celeb_data.get("status")
@@ -188,10 +189,19 @@ async def delete_celebrity_handler(call: CallbackQuery, state: FSMContext, celeb
     celeb_data["status"] = status
 
     chat_id = call.message.chat.id
+    raw_id = celeb_data.get("id")
+
+    try:
+        rec_id = int(celeb_id)
+    except (TypeError, ValueError):
+        await call.message.answer("❌ Не удалось определить ID записи для удаления.")
+        return
+
     try:
         await celebrity_service.delete_celebrity(**celeb_data)
+        delete_row_by_id(rec_id)
     except Exception as e:
-        await call.message.answer("Ошибка при удалении записи")
+        await call.message.answer("Ошибка при удалении записи в таблицах (нет id)")
         logger.error("Error deleting celebrity: ", e)
     else:
         new_search_b = get_new_search_button()

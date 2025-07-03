@@ -11,11 +11,9 @@ from sheets_client import push_row
 app = Flask(__name__)
 SHEET_WEBHOOK_SECRET = os.environ["SHEET_WEBHOOK_SECRET"]
 
-# 1) Создаём отдельный asyncio-лоуп и делаем его текущим
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
 
-# 2) Инициализируем базу и пул на этом loop
 loop.run_until_complete(DatabaseManager.init())
 pool = loop.run_until_complete(DatabaseManager.get_pool())
 service = CelebrityService(pool)
@@ -24,18 +22,12 @@ service = CelebrityService(pool)
 @app.route("/sheet-webhook", methods=["POST"])
 def sheet_webhook():
     try:
-        # 1) Проверка токена
         if request.headers.get("X-Webhook-Token") != SHEET_WEBHOOK_SECRET:
             abort(403)
 
         data = request.get_json(silent=True) or {}
 
-        # 2) Парсим строку
-        sheet_row = data.get("_row")
-        try:
-            sheet_row = int(sheet_row) if sheet_row is not None else None
-        except (TypeError, ValueError):
-            sheet_row = None
+        action = data.get("action", "").strip().lower()
 
         raw_id = data.get("id")
         try:
@@ -43,7 +35,18 @@ def sheet_webhook():
         except (TypeError, ValueError):
             rec_id = None
 
-        # 3) Читаем и нормализуем поля
+        sheet_row = data.get("_row")
+        try:
+            sheet_row = int(sheet_row) if sheet_row is not None else None
+        except (TypeError, ValueError):
+            sheet_row = None
+
+        if action == "delete":
+            if not rec_id:
+                abort(400, "Missing id for delete")
+            loop.run_until_complete(service.delete_by_id(rec_id))
+            return jsonify({"ok": True})
+
         name_orig = data.get("name", "").strip()
         geo_orig  = data.get("geo",  "").strip()
 
@@ -53,13 +56,11 @@ def sheet_webhook():
         status   = data.get("status",   "").strip().lower()
 
         if not all([name, category, geo, status]):
-            abort(400, "Missing fields")
+            abort(400, "Missing fields for upsert")
 
-        # 4) Вставка или обновление в БД
         if rec_id:
             updated = loop.run_until_complete(
-                service.update_by_id(
-                    rec_id,
+                service.update_by_id(rec_id,
                     name=name,
                     category=category,
                     geo=geo,
@@ -76,13 +77,13 @@ def sheet_webhook():
                 )
             )
 
-        # 5) Пушим обратно в Google Sheets
         push_row(updated, sheet_row)
         return jsonify({"ok": True})
 
     except Exception as e:
         logger.error("Error in /sheet-webhook:\n" + traceback.format_exc())
         return jsonify({"ok": False, "error": str(e)}), 500
+
 
 
 if __name__ == "__main__":

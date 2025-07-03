@@ -150,6 +150,7 @@ async def handle_request(name_input: str, category: str, geo: str, message: type
         status = matched['status']
         geo = matched['geo']
         raw_cat = matched['category']
+        celeb_id = matched['id']
         category = raw_cat.strip().lower()
         display_category = 'ЖКТ' if category.lower() == 'жкт' else category.title()
 
@@ -159,6 +160,8 @@ async def handle_request(name_input: str, category: str, geo: str, message: type
         f"Статус: {status.title()}{emoji}\n"
         f"Категория: {display_category.title()}\n"
         f"Гео: {geo.title()}"]
+
+        await state.update_data(celeb_id=celeb_id)
 
         show_celebs = False
         if status.lower() == "нельзя использовать":

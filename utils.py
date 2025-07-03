@@ -74,3 +74,4 @@ async def is_admin_or_moderator_or_observer(user_id: int, subscribers_service) -
     moderators = await subscribers_service.get_moderators()
     observers = await subscribers_service.get_observers()
     return user_id in moderators or user_id in observers
+
