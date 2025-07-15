@@ -64,3 +64,10 @@ class SubscribersService:
         async with self.pool.acquire() as conn:
             rows = await conn.fetch("SELECT chat_id FROM subscribers WHERE role = 'observer'")
             return [row['chat_id'] for row in rows]
+
+    async def get_user_role(self, chat_id: int) -> str | None:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT * FROM subscribers WHERE chat_id = $1", chat_id)
+            if row:
+                return row["role"]
+            return None

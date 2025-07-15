@@ -41,7 +41,10 @@ def create_on_startup(dp: Dispatcher, bot: Bot):
 
         for user_id in extra_users:
             role = await dp['subscribers_service'].get_user_role(user_id)
-            await command_manager.set_commands_for_user(bot, user_id, role)
+            if role:
+                await command_manager.set_commands_for_user(bot, user_id, role)
+            else:
+                config.logger.info(f"Error getting user role for user {user_id}")
 
         await command_manager.set_admin_commands(bot)
         await command_manager.set_global_commands(bot)
