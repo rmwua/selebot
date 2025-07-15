@@ -7,6 +7,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from asyncpg import UniqueViolationError
 
+from command_manager import CommandManager
 from config import logger, ADMIN_ID
 from db.celebrity_service import CelebrityService
 from db.requests_service import RequestsService
@@ -225,18 +226,16 @@ async def edit_back_button_handler(call: CallbackQuery, state: FSMContext):
         return
 
 
-async def cmd_requests(message: Message, requests_service: RequestsService, subscribers_service: SubscribersService):
+async def cmd_requests(
+    message: Message,
+    requests_service: RequestsService,
+):
     await message.delete()
 
     requests = await requests_service.get_all_pending_requests()
     if not requests:
         await message.answer("Активных заявок нет.")
         return
-
-    moderators = await subscribers_service.get_moderators()
-    observers = await subscribers_service.get_observers()
-    moderators.append(ADMIN_ID)
-    msg_ids = []
 
     for request in requests:
         request_id, name, cat, geo, username = request[:5]
@@ -246,37 +245,16 @@ async def cmd_requests(message: Message, requests_service: RequestsService, subs
         builder.button(text="🗑 Удалить заявку", callback_data=f"delete:{request_id}")
         builder.adjust(2, 1)
 
-        text = f"<b>Необработанная заявка:</b>\n"\
-                f"Имя: {name.title()}\n"\
-                f"Категория: {cat.title()}\n"\
-                f"Гео: {geo.title()}\n"\
-                f"Номер Заявки: {request_id}\n"\
-                f"Юзер: {'@'+username if username else ''}"
+        text = (
+            f"<b>Необработанная заявка:</b>\n"
+            f"Имя: {name.title()}\n"
+            f"Категория: {cat.title()}\n"
+            f"Гео: {geo.title()}\n"
+            f"Номер Заявки: {request_id}\n"
+            f"Юзер: {'@'+username if username else ''}"
+        )
 
-        for mod_id in moderators:
-            try:
-                msg = await message.bot.send_message(
-                    chat_id=mod_id,
-                    text=text,
-                    reply_markup=builder.as_markup(),
-                    parse_mode="HTML"
-                )
-                msg_ids.append({"chat_id": mod_id, "message_id": msg.message_id})
-
-            except Exception as e:
-                logger.warning("Failed to send message to moderator", exc_info=e)
-
-        for ob_id in observers:
-            try:
-                msg = await message.bot.send_message(
-                    chat_id=ob_id,
-                    text=text,
-                    parse_mode="HTML"
-                )
-                msg_ids.append({"chat_id": ob_id, "message_id": msg.message_id})
-
-            except Exception as e:
-                logger.warning("Failed to send message to observer", exc_info=e)
+        await message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
 
 
 async def delete_request_handler(call: CallbackQuery, requests_service: RequestsService):
@@ -516,7 +494,7 @@ async def resume_role_changing_handler(call: CallbackQuery, state: FSMContext, s
     await send_role_selection(state, call.message.chat.id, call.bot, user_id)
 
 
-async def role_chosen_handler(call: CallbackQuery, state: FSMContext, subscribers_service: SubscribersService):
+async def role_chosen_handler(call: CallbackQuery, state: FSMContext, subscribers_service: SubscribersService, bot: Bot):
     await call.answer()
     _, user_id_str, new_role = call.data.split(":")
 
@@ -531,3 +509,6 @@ async def role_chosen_handler(call: CallbackQuery, state: FSMContext, subscriber
     await call.message.answer(f"Роль пользователя {user_id} успешно изменена на {new_role.capitalize()}")
     await state.clear()
     await call.message.delete()
+
+    command_manager = CommandManager()
+    await command_manager.set_commands_for_user(bot, user_id, new_role)

@@ -1,9 +1,7 @@
 import asyncio
 import config
-from aiogram import types
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, StateFilter
-from config import logger
 
 from db.celebrity_service import CelebrityService
 from db.database_manager import DatabaseManager
@@ -26,6 +24,7 @@ from handlers.user_handlers import (
     approved_geo_chosen_handler, back_to_approved_handler, approved_cat_chosen_handler,
 )
 from states import EditCelebrity, EditUserRole
+from command_manager import CommandManager
 
 
 def create_on_startup(dp: Dispatcher, bot: Bot):
@@ -34,36 +33,22 @@ def create_on_startup(dp: Dispatcher, bot: Bot):
         dp['celebrity_service'] = CelebrityService(pool)
         dp['requests_service'] = RequestsService(pool)
         dp['subscribers_service'] = SubscribersService(pool)
+        command_manager = CommandManager()
 
-        common_commands = [
-            types.BotCommand(command="start", description="Инфо о боте"),
-            types.BotCommand(command="search", description="Новый поиск/Заявка модератору"),
-            types.BotCommand(command="approved", description="Список согласованных селеб")
-        ]
-        admin_commands = common_commands + [types.BotCommand(command="requests", description="Посмотреть активные заявки "),
-                                            types.BotCommand(command="users",
-                                                             description="Посмотреть кто подписан на бота"),
-                                            types.BotCommand(command="role", description="Редактирование роли юзера")]
-
-        mod_observer_commands = common_commands + [
-            types.BotCommand(command="requests", description="Посмотреть активные заявки")
-        ]
         moderators = await dp['subscribers_service'].get_moderators()
         observers = await dp['subscribers_service'].get_observers()
         extra_users = moderators + observers
 
         for user_id in extra_users:
-            try:
-                await bot.set_my_commands(mod_observer_commands, scope=types.BotCommandScopeChat(chat_id=user_id))
-            except Exception as e:
-                logger.warning(f"Failed to set commands for user {user_id}: {e}")
+            role = await dp['subscribers_service'].get_user_role(user_id)
+            await command_manager.set_commands_for_user(bot, user_id, role)
 
-        await bot.set_my_commands(admin_commands, scope=types.BotCommandScopeChat(chat_id=config.ADMIN_ID))
-        await bot.set_my_commands(common_commands)
+        await command_manager.set_admin_commands(bot)
+        await command_manager.set_global_commands(bot)
 
     return on_startup
 
-async def on_shutdown(dp: Dispatcher):
+async def on_shutdown():
     await DatabaseManager.close()
 
 
