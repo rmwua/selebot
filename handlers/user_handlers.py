@@ -1,10 +1,11 @@
 import asyncio
-from aiogram import types
+from aiogram import types, Bot
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 import config
+from command_manager import CommandManager
 from db.celebrity_service import CelebrityService
 from db.requests_service import RequestsService
 from db.subcribers_service import SubscribersService
@@ -18,7 +19,7 @@ from utils import is_moderator
 logger = config.logger
 
 
-async def cmd_start(message: types.Message, subscribers_service: SubscribersService, state: FSMContext):
+async def cmd_start(message: types.Message, subscribers_service: SubscribersService, state: FSMContext, command_manager: CommandManager, bot:Bot):
     try:
         await message.delete()
     except TelegramBadRequest:
@@ -27,6 +28,7 @@ async def cmd_start(message: types.Message, subscribers_service: SubscribersServ
     data = await state.get_data()
     if data.get("started"):
         return
+    user_id = message.from_user.id
 
     async def reset_flag():
         await asyncio.sleep(2)
@@ -35,6 +37,9 @@ async def cmd_start(message: types.Message, subscribers_service: SubscribersServ
     asyncio.create_task(reset_flag())
     await state.update_data(started=True)
     await subscribers_service.add_subscriber(message.chat.id, message.from_user.username)
+
+    user_role = await subscribers_service.get_user_role(user_id)
+    await command_manager.set_commands_for_user(bot, user_id, user_role)
 
     await message.answer(text="👋 Привет! Я — бот для поиска и согласования селеб."
                               "\n\n🔍 Чтобы начать поиск, отправьте команду"
