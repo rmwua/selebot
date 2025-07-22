@@ -39,6 +39,7 @@ async def cmd_start(message: types.Message, subscribers_service: SubscribersServ
     await subscribers_service.add_subscriber(message.chat.id, message.from_user.username)
 
     user_role = await subscribers_service.get_user_role(user_id)
+    logger.info(f"USER ROLE: {user_role}")
     await command_manager.set_commands_for_user(bot, user_id, user_role)
 
     await message.answer(text="👋 Привет! Я — бот для поиска и согласования селеб."

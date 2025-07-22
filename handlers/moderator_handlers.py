@@ -226,24 +226,19 @@ async def edit_back_button_handler(call: CallbackQuery, state: FSMContext):
         return
 
 
-async def cmd_requests(
-    message: Message,
-    requests_service: RequestsService,
-):
+async def cmd_requests(message: Message, requests_service: RequestsService, subscribers_service: SubscribersService):
     await message.delete()
 
+    user_id = message.from_user.id
+    user_role = await subscribers_service.get_user_role(user_id)
     requests = await requests_service.get_all_pending_requests()
+
     if not requests:
         await message.answer("Активных заявок нет.")
         return
 
     for request in requests:
         request_id, name, cat, geo, username = request[:5]
-        builder = InlineKeyboardBuilder()
-        builder.button(text="✅ Одобрить", callback_data=f"approve:{request_id}")
-        builder.button(text="⛔ Забанить", callback_data=f"ban:{request_id}")
-        builder.button(text="🗑 Удалить заявку", callback_data=f"delete:{request_id}")
-        builder.adjust(2, 1)
 
         text = (
             f"<b>Необработанная заявка:</b>\n"
@@ -254,7 +249,15 @@ async def cmd_requests(
             f"Юзер: {'@'+username if username else ''}"
         )
 
-        await message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+        if user_role != 'observer':
+            builder = InlineKeyboardBuilder()
+            builder.button(text="✅ Одобрить", callback_data=f"approve:{request_id}")
+            builder.button(text="⛔ Забанить", callback_data=f"ban:{request_id}")
+            builder.button(text="🗑 Удалить заявку", callback_data=f"delete:{request_id}")
+            builder.adjust(2, 1)
+            await message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+        else:
+            await message.answer(text, parse_mode="HTML")
 
 
 async def delete_request_handler(call: CallbackQuery, requests_service: RequestsService):
