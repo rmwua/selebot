@@ -12,6 +12,7 @@ class CelebrityService:
         asc = sanitize_ascii(name)
         cat = category.lower()
         loc = geo.lower()
+        MIN_SIMILARITY = 0.6
 
         async with self.pool.acquire() as conn:
             # 1) exact
@@ -54,11 +55,17 @@ class CelebrityService:
                 """
                 SELECT id, name, category, geo, status
                   FROM celebrities
-                 WHERE category= $1
-                   AND geo      = $2
+                 WHERE lower(category) = $1
+                   AND lower(geo)      = $2
+                   -- % оставляем, чтобы быстро отсечь совсем чужие записи,
+                   -- но дополнительно проверяем similarity > MIN_SIMILARITY
                    AND (
                         normalized_name % $3
                      OR ascii_name      % $4
+                   )
+                   AND (
+                        similarity(normalized_name, $3) > $5
+                     OR similarity(ascii_name,      $4) > $5
                    )
                  ORDER BY
                    GREATEST(
@@ -67,7 +74,7 @@ class CelebrityService:
                    ) DESC
                  LIMIT 1
                 """,
-                cat, loc, cyr, asc
+                cat, loc, cyr, asc, MIN_SIMILARITY
             )
             return dict(row) if row else None
 
