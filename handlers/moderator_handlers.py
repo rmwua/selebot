@@ -11,7 +11,7 @@ from command_manager import CommandManager
 from config import logger, ADMIN_ID
 from db.celebrity_service import CelebrityService
 from db.requests_service import RequestsService
-from db.subcribers_service import SubscribersService
+from db.subscribers_service import SubscribersService
 from keyboards import get_new_search_button, get_edit_keyboard, get_categories_keyboard, get_geo_keyboard, \
     cancel_role_change_kb
 from models import USER_ROLES
@@ -255,7 +255,11 @@ async def cmd_requests(message: Message, requests_service: RequestsService, subs
             builder.button(text="⛔ Забанить", callback_data=f"ban:{request_id}")
             builder.button(text="🗑 Удалить заявку", callback_data=f"delete:{request_id}")
             builder.adjust(2, 1)
-            await message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+            msg = await message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+            PENDING_MESSAGES.setdefault(request_id, []).append({
+                "chat_id": msg.chat.id,
+                "message_id": msg.message_id
+            })
         else:
             await message.answer(text, parse_mode="HTML")
 

@@ -5,7 +5,7 @@ from transliterate import translit
 import unidecode
 
 import config
-from db.subcribers_service import SubscribersService
+from db.subscribers_service import SubscribersService
 
 
 def is_moderator(user_id: int) -> bool:

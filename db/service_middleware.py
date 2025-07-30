@@ -2,7 +2,7 @@ from aiogram import BaseMiddleware
 
 from db.celebrity_service import CelebrityService
 from db.requests_service import RequestsService
-from db.subcribers_service import SubscribersService
+from db.subscribers_service import SubscribersService
 from command_manager import CommandManager
 
 

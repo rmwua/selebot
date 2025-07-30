@@ -8,7 +8,7 @@ import config
 from command_manager import CommandManager
 from db.celebrity_service import CelebrityService
 from db.requests_service import RequestsService
-from db.subcribers_service import SubscribersService
+from db.subscribers_service import SubscribersService
 from handlers.moderator_handlers import send_request_to_moderator, handle_request_moderator
 from keyboards import get_new_search_button, get_geo_keyboard, get_categories_keyboard
 from states import SearchMenu
@@ -256,7 +256,10 @@ async def callback_handler(call: types.CallbackQuery, requests_service: Requests
         reply_markup=kb.as_markup()
     )
 
-    await call.bot.delete_message(chat_id=chat_id, message_id=prompt_id)
+    try:
+        await call.bot.delete_message(chat_id=chat_id, message_id=prompt_id)
+    except TelegramBadRequest as e:
+        logger.error(e)
 
 
 async def back_handler(call: types.CallbackQuery, state: FSMContext):

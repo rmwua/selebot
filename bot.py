@@ -7,7 +7,7 @@ from db.celebrity_service import CelebrityService
 from db.database_manager import DatabaseManager
 from db.requests_service import RequestsService
 from db.service_middleware import ServiceMiddleware
-from db.subcribers_service import SubscribersService
+from db.subscribers_service import SubscribersService
 from filters import AdminModObserverFilter
 from handlers.moderator_handlers import edit_handler, field_chosen, name_edited, edit_back_button_handler, \
     new_param_chosen, delete_celebrity_handler, delete_request_handler, cmd_requests, cmd_users, cmd_role, \
