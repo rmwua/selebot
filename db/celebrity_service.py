@@ -1,5 +1,6 @@
 from typing import Dict, Any
 
+from config import logger
 from utils import sanitize_cyr, sanitize_ascii
 
 
@@ -12,7 +13,7 @@ class CelebrityService:
         asc = sanitize_ascii(name)
         cat = category.lower()
         loc = geo.lower()
-        MIN_SIMILARITY = 0.6
+        MIN_SIMILARITY = 0.8
 
         async with self.pool.acquire() as conn:
             # 1) exact
@@ -48,7 +49,7 @@ class CelebrityService:
                 cat, loc, cyr, asc
             )
             if row:
-                return dict(row)
+               return dict(row)
 
             # 3) fuzzy via pg_trgm
             row = await conn.fetchrow(
