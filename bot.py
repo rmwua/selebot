@@ -21,7 +21,7 @@ from handlers.user_handlers import (
     name_entered,
     SearchMenu,
     manual_handler, back_handler, new_search_handler, available_celebs_handler, cmd_approved, cancel_handler,
-    approved_geo_chosen_handler, back_to_approved_handler, approved_cat_chosen_handler,
+    approved_geo_chosen_handler, back_to_approved_handler, approved_cat_chosen_handler, similar_celebs_handler,
 )
 from states import EditCelebrity, EditUserRole
 from command_manager import CommandManager
@@ -94,6 +94,7 @@ async def main():
     dp.callback_query.register(back_to_approved_handler, F.data == "back:approved", StateFilter(SearchMenu.choosing_cat))
     dp.callback_query.register(back_handler,F.data.startswith("back:"))
     dp.callback_query.register(new_search_handler,F.data == "new_search")
+    dp.callback_query.register(similar_celebs_handler, F.data.startswith("similar:"))
 
     dp.callback_query.register(edit_handler, F.data == "edit")
     dp.callback_query.register(field_chosen, F.data.startswith("edit_field:"), StateFilter(EditCelebrity.choosing_field))

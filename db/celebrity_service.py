@@ -1,4 +1,4 @@
-from typing import Dict, Any
+from typing import Dict, Any, Union, List
 
 from config import logger
 from utils import sanitize_cyr, sanitize_ascii
@@ -8,7 +8,7 @@ class CelebrityService:
     def __init__(self, pool):
         self.pool = pool
 
-    async def find_celebrity(self, name: str, category: str, geo: str) -> dict | None:
+    async def find_celebrity(self, name: str, category: str, geo: str) -> Union[Dict[str, Any], List[Dict[str, Any]], None]:
         cyr = sanitize_cyr(name)
         asc = sanitize_ascii(name)
         cat = category.lower()
@@ -34,7 +34,7 @@ class CelebrityService:
                 return dict(row)
 
             # 2) substring
-            row = await conn.fetchrow(
+            rows = await conn.fetch(
                 """
                 SELECT id, name, category, geo, status
                   FROM celebrities
@@ -44,15 +44,15 @@ class CelebrityService:
                         normalized_name LIKE '%' || $3 || '%'
                      OR ascii_name      LIKE '%' || $4 || '%'
                    )
-                 LIMIT 1
+                 LIMIT 5
                 """,
                 cat, loc, cyr, asc
             )
-            if row:
-               return dict(row)
+            if rows:
+                return [dict(r) for r in rows]
 
             # 3) fuzzy via pg_trgm
-            row = await conn.fetchrow(
+            rows = await conn.fetch(
                 """
                 SELECT id, name, category, geo, status
                   FROM celebrities
@@ -73,11 +73,11 @@ class CelebrityService:
                      similarity(normalized_name, $3),
                      similarity(ascii_name,      $4)
                    ) DESC
-                 LIMIT 1
+                 LIMIT 5
                 """,
                 cat, loc, cyr, asc, MIN_SIMILARITY
             )
-            return dict(row) if row else None
+            return [dict(r) for r in rows] if rows else None
 
     async def insert_celebrity(self, name: str, category: str, geo: str, status: str) -> dict:
         """

@@ -2,6 +2,7 @@ import asyncio
 from aiogram import types, Bot
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
+from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 import config
@@ -17,6 +18,22 @@ from synonyms import category_synonyms, geo_synonyms
 from utils import is_moderator
 
 logger = config.logger
+
+
+def build_card_text(celeb: dict) -> str:
+    name = celeb["name"]
+    status = celeb["status"]
+    geo = celeb["geo"]
+    raw_cat = celeb["category"]
+    category = raw_cat.strip().lower()
+    display_category = "ЖКТ" if category == "жкт" else category.title()
+    emoji = "✅" if status.lower() == "согласована" else "⛔"
+    return "\n".join([
+        f"Селеба: {name.title()}",
+        f"Статус: {status.title()}{emoji}",
+        f"Категория: {display_category}",
+        f"Гео: {geo.title()}",
+    ])
 
 
 async def cmd_start(message: types.Message, subscribers_service: SubscribersService, state: FSMContext, command_manager: CommandManager, bot:Bot):
@@ -63,6 +80,7 @@ async def cmd_search(message: types.Message, state: FSMContext):
                 await message.delete()
             except Exception as e:
                 pass
+
 
 async def mode_chosen(call: types.CallbackQuery, state: FSMContext):
     mode = call.data.split(":", 1)[1]
@@ -150,42 +168,18 @@ async def handle_request(name_input: str, category: str, geo: str, message: type
     matched = await celebrity_service.find_celebrity(name_input, category, geo)
     user_id = message.from_user.id
     username = message.from_user.username
+    similar = False
 
-    if matched:
-        name = matched['name']
-        status = matched['status']
-        geo = matched['geo']
-        raw_cat = matched['category']
-        celeb_id = matched['id']
-        category = raw_cat.strip().lower()
-        display_category = 'ЖКТ' if category.lower() == 'жкт' else category.title()
+    if isinstance(matched, list):
+        if not matched:
+            matched = None
+        else:
+            similar_list = matched
+            matched = matched[0]
+            similar = True
+            await state.update_data(query_name=name_input, cat=category, geo=geo, similar_list=similar_list, initial_celeb_id=matched["id"])
 
-        emoji = "✅" if matched['status'].lower() == 'согласована' else "⛔"
-
-        text = [f"Селеба: {name.title()}\n"
-        f"Статус: {status.title()}{emoji}\n"
-        f"Категория: {display_category.title()}\n"
-        f"Гео: {geo.title()}"]
-
-        await state.update_data(celeb_id=celeb_id)
-
-        show_celebs = False
-        if status.lower() == "нельзя использовать":
-            text.append("\nВы можете ознакомиться с доступным списком селеб по данному гео/категории:")
-            show_celebs = True
-            await state.update_data(geo=geo, cat=category)
-
-        kb = get_new_search_button(show_edit_button=True, is_moderator=is_moderator(user_id), show_celebs=show_celebs)
-        kb.adjust(1)
-
-        text = "\n".join(text)
-
-        await message.answer(
-            text=text,
-            reply_markup=kb.as_markup()
-        )
-        await message.bot.delete_message(chat_id=chat_id, message_id=prompt_id)
-    else:
+    if matched is None:
         request_id = await send_request_to_moderator(name_input, category, geo, prompt_id, username, message, requests_service, subscribers_service)
 
         text = f"Ваш запрос в обработке, ожидайте ответа модератора. Номер заявки: {request_id}"
@@ -196,6 +190,37 @@ async def handle_request(name_input: str, category: str, geo: str, message: type
             message_id=prompt_id,
             reply_markup=get_new_search_button().as_markup(),
         )
+        return
+
+    status = matched['status']
+    geo = matched['geo']
+    raw_cat = matched['category']
+    celeb_id = matched['id']
+    category = raw_cat.strip().lower()
+
+    text = [build_card_text(matched)]
+
+    await state.update_data(celeb_id=celeb_id)
+
+    show_celebs = False
+    if status.lower() == "нельзя использовать":
+        text.append("\nВы можете ознакомиться с доступным списком селеб по данному гео/категории:")
+        show_celebs = True
+        await state.update_data(geo=geo, cat=category)
+
+    kb = get_new_search_button(show_edit_button=True, is_moderator=is_moderator(user_id), show_celebs=show_celebs, similar=similar)
+    kb.adjust(1)
+
+    text = "\n".join(text)
+
+    await message.answer(
+        text=text,
+        reply_markup=kb.as_markup()
+    )
+    try:
+        await message.bot.delete_message(chat_id=chat_id, message_id=prompt_id)
+    except TelegramBadRequest:
+        pass
 
 
 async def available_celebs_handler(call: types.CallbackQuery, celebrity_service: CelebrityService, state: FSMContext):
@@ -206,7 +231,7 @@ async def available_celebs_handler(call: types.CallbackQuery, celebrity_service:
 
     celebs = await celebrity_service.get_celebrities(geo, category)
     if celebs:
-        text = "<b>Доступные селебы:</b>\n\n" + "\n".join(c.title() for c in celebs)
+        text = f"<b>Доступные селебы \n гео: {geo.title()}, категория: {category.title()}:</b>\n\n" + "\n".join(c.title() for c in celebs)
         await call.message.answer(text, parse_mode="html")
         await call.answer()
     else:
@@ -218,6 +243,7 @@ async def available_celebs_handler(call: types.CallbackQuery, celebrity_service:
         await call.message.edit_reply_markup(reply_markup=kb.as_markup())
     except TelegramBadRequest as e:
         pass
+
 
 async def callback_handler(call: types.CallbackQuery, requests_service: RequestsService, celebrity_service: CelebrityService, state: FSMContext):
     handled = await handle_request_moderator(call, requests_service, celebrity_service)
@@ -340,4 +366,98 @@ async def approved_cat_chosen_handler(call: types.CallbackQuery, state: FSMConte
     await state.update_data(cat=cat)
     await call.message.delete()
     await available_celebs_handler(call, celebrity_service, state)
+
+
+async def similar_celebs_handler(call: types.CallbackQuery, state: FSMContext, requests_service: RequestsService, subscribers_service: SubscribersService):
+    await call.answer()
+    data = await state.get_data()
+    similar_list = data.get("similar_list") or []
+    initial_celeb_id = data.get("initial_celeb_id")
+
+    if not similar_list:
+        kb = get_new_search_button()
+        return await call.message.edit_text(
+            "Похожие селебы недоступны. Начните новый поиск.",
+            reply_markup=kb.as_markup()
+        )
+
+    payload = call.data
+
+    def build_list_kb():
+        kb = InlineKeyboardBuilder()
+        for rec in similar_list:
+            kb.button(text=rec["name"].title(), callback_data=f"similar:select:{rec['id']}")
+        kb.button(text="⬅️ Назад к карточке", callback_data="similar:back")
+        kb.button(text="🔄 Новый поиск", callback_data="new_search")
+        kb.button(text="📝 Отправить заявку модератору", callback_data="similar:request")
+        kb.adjust(1)
+        return kb.as_markup()
+
+    async def render_card(chosen: dict):
+        text = build_card_text(chosen)
+
+        status = (chosen.get("status") or "").lower()
+        cat_l = (chosen.get("category") or "").strip().lower()
+        geo_l = (chosen.get("geo") or "").strip().lower()
+        show_celebs = False
+        if status == "нельзя использовать":
+            text += "\n\nВы можете ознакомиться с доступным списком селеб по данному гео/категории:"
+            show_celebs = True
+            await state.update_data(geo=geo_l, cat=cat_l)
+
+        user_id = call.from_user.id
+        kb = get_new_search_button(show_celebs=show_celebs, show_edit_button=True,is_moderator=is_moderator(user_id))
+        kb.button(text="⬅️ Назад к списку", callback_data="similar:open")
+        kb.adjust(1)
+        return await call.message.edit_text(text, reply_markup=kb.as_markup())
+
+    if payload == "similar:open":
+        return await call.message.edit_text(
+            "Нашли похожих — выберите нужную.\n"
+            "Если нужной Селебы нет, нажмите «📝 Отправить заявку модератору».",
+            reply_markup=build_list_kb()
+        )
+
+    elif payload == "similar:back":
+        chosen = next((r for r in similar_list if int(r["id"]) == int(initial_celeb_id)), None) if initial_celeb_id is not None else None
+        if chosen is None:
+            chosen = similar_list[0]
+        return await render_card(chosen)
+
+    elif payload.startswith("similar:select:"):
+        try:
+            sel_id = int(payload.split(":", 2)[2])
+        except ValueError:
+            return await call.message.edit_text("Не удалось определить селебу. Выберите из списка:", reply_markup=build_list_kb())
+
+        chosen = next((r for r in similar_list if int(r["id"]) == sel_id), None)
+        if not chosen:
+            return await call.message.edit_text("Не нашли выбранную запись. Выберите из списка:", reply_markup=build_list_kb())
+
+        return await render_card(chosen)
+
+    elif payload == "similar:request":
+        query_name = data.get("query_name")
+        category = data.get("cat")
+        geo = data.get("geo")
+        if not (query_name and category and geo):
+            return await call.message.edit_text(
+                "Не хватает данных для заявки. Начните новый поиск и укажите имя/категорию/гео.",
+                reply_markup=get_new_search_button().as_markup()
+            )
+
+        prompt_id = data.get("prompt_message_id") or call.message.message_id
+        username = call.from_user.username
+        request_id = await send_request_to_moderator(
+            query_name, category, geo, prompt_id, username, call.message, requests_service, subscribers_service
+        )
+
+        text = f"Ваш запрос в обработке, ожидайте ответа модератора. Номер заявки: {request_id}"
+        return await call.message.edit_text(text, reply_markup=get_new_search_button().as_markup())
+
+    return await call.message.edit_text("Выберите нужную Селебу из списка:", reply_markup=build_list_kb())
+
+
+
+
 
