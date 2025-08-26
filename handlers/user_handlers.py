@@ -190,7 +190,8 @@ async def handle_batch_request(names: list, category: str, geo: str, message: ty
         else:
             not_found.append({"query": name, "rec": matched})
 
-    text = ""
+    text = (f"Гео: {geo.title()}\n"
+            f"Категория: {category.title()}\n")
 
     def _format_item_line(item: dict) -> str:
         rec = item.get("rec") or item.get("first")
