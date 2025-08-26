@@ -2,7 +2,6 @@ import asyncio
 from aiogram import types, Bot
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
-from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 import config
@@ -15,7 +14,7 @@ from keyboards import get_new_search_button, get_geo_keyboard, get_categories_ke
 from states import SearchMenu
 
 from synonyms import category_synonyms, geo_synonyms
-from utils import is_moderator
+from utils import is_moderator, split_names
 
 logger = config.logger
 
@@ -63,7 +62,14 @@ async def cmd_start(message: types.Message, subscribers_service: SubscribersServ
                               "\n\n🔍 Чтобы начать поиск, отправьте команду"
                               "\n/search"
                               "\n\n❓ Если нужной селебы нет в нашей базе, ваш запрос попадёт к модератору для обработки."
-                              "\n\n✅ Также вы можете посмотреть список согласованных селеб командой /approved")
+                              "\n\n✅ Также вы можете посмотреть список согласованных селеб командой /approved"
+                              "\n\n💡 Массовый поиск (несколько имён)"
+                                "\n 1) /search → «По меню» → выберите регион и категорию."
+                                "\n 2) Введите сразу несколько имён через запятую, точку с запятой или с новой строки."
+                                "\n\nПример:"
+                                 "\nTomira Kowalik, Joanna Kotaczkowska, Krystyna Janda"
+                                "\n\nВ ответ придёт одно сообщение-сводка"
+                         )
 
 
 async def cmd_search(message: types.Message, state: FSMContext):
@@ -132,11 +138,13 @@ async def cat_chosen(call: types.CallbackQuery, state: FSMContext):
 
 async def name_entered(message: types.Message, state: FSMContext, celebrity_service: CelebrityService, requests_service: RequestsService, subscribers_service: SubscribersService):
     data = await state.get_data()
-    name_input = message.text.strip().lower()
     geo  = data['geo']
     cat  = data['category']
-
-    await handle_request(name_input, cat, geo, message, state, celebrity_service, requests_service, subscribers_service)
+    names = split_names(message.text)
+    if len(names) == 1:
+        name_input = names[0]
+        return await handle_request(name_input, cat, geo, message, state, celebrity_service, requests_service, subscribers_service)
+    return await handle_batch_request(names, cat, geo, message, state, celebrity_service, requests_service, subscribers_service)
 
 
 async def manual_handler(message: types.Message, state: FSMContext, celebrity_service: CelebrityService, requests_service: RequestsService, subscribers_service: SubscribersService):
@@ -159,6 +167,53 @@ async def manual_handler(message: types.Message, state: FSMContext, celebrity_se
         return await message.answer("Знаменитость не согласована. Данного гео пока нет.", reply_markup=new_search_b.as_markup())
 
     await handle_request(name_input, category, geo, message, state, celebrity_service, requests_service, subscribers_service)
+
+
+async def handle_batch_request(names: list, category: str, geo: str, message: types.Message, state: FSMContext, celebrity_service: CelebrityService, requests_service: RequestsService, subscribers_service: SubscribersService):
+    found: list[dict] = []
+    not_found: list[dict] = []
+    ambiguous: list[dict] = []
+
+    batch_similar_map: dict[int, list[dict]] = {}
+    data = await state.get_data()
+    prompt_id = data.get('prompt_message_id')
+    chat_id = message.chat.id
+
+    for idx, name in enumerate(names):
+        matched = await celebrity_service.find_celebrity(name, category, geo)
+        if isinstance(matched, dict):
+            found.append({"query": name, "rec": matched})
+        elif isinstance(matched, list):
+            first = matched[0]
+            ambiguous.append({"idx": idx, "query": name, "first": first, "all": matched})
+            batch_similar_map[idx] = matched
+        else:
+            not_found.append({"query": name, "rec": matched})
+
+    text = ""
+
+    def _format_item_line(item: dict) -> str:
+        rec = item.get("rec") or item.get("first")
+        if not rec:
+            return ""
+        status = (rec.get("status") or "")
+        emoji = "⛔" if status.lower() == "нельзя использовать" else "✅"
+        return f"\n{rec['name'].title()} - {status}{emoji}"
+
+    for item in (found + ambiguous):
+        text += _format_item_line(item)
+
+    for item in not_found:
+        name_input = item["query"]
+        prompt_id = data.get('prompt_message_id')
+        username = message.from_user.username
+
+        request_id = await send_request_to_moderator(name_input, category, geo, prompt_id, username, message,requests_service, subscribers_service)
+        item_text = f"\n{name_input.title()} - Отправлен запрос модератору 🟡 Номер заявки: {request_id}"
+        text += item_text
+
+    kb = get_new_search_button()
+    await message.answer(text=text, reply_markup=kb.as_markup())
 
 
 async def handle_request(name_input: str, category: str, geo: str, message: types.Message, state: FSMContext, celebrity_service: CelebrityService, requests_service: RequestsService, subscribers_service: SubscribersService):
@@ -231,7 +286,7 @@ async def available_celebs_handler(call: types.CallbackQuery, celebrity_service:
 
     celebs = await celebrity_service.get_celebrities(geo, category)
     if celebs:
-        text = f"<b>Доступные селебы \n гео: {geo.title()}, категория: {category.title()}:</b>\n\n" + "\n".join(c.title() for c in celebs)
+        text = f"<b>Доступные селебы на {geo.title()}/{category.title()}:</b>\n\n" + "\n".join(c.title() for c in celebs)
         await call.message.answer(text, parse_mode="html")
         await call.answer()
     else:

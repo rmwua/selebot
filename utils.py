@@ -75,3 +75,8 @@ async def is_admin_or_moderator_or_observer(user_id: int, subscribers_service) -
     observers = await subscribers_service.get_observers()
     return user_id in moderators or user_id in observers
 
+
+def split_names(raw: str) -> list[str]:
+    parts = re.split(r'[,;\n]+', raw, flags=re.UNICODE)
+    return [p.strip().lower() for p in parts if p.strip()]
+
