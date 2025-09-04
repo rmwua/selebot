@@ -119,7 +119,10 @@ async def name_edited(message: Message, state: FSMContext, celebrity_service: Ce
 
     try:
         updated = await celebrity_service.update_celebrity(**celeb_data, new_name=name_input.lower())
-        push_row(updated)
+        if updated:
+            push_row(updated)
+        else:
+            await message.answer("❌ Ошибка при обновлении записи.")
 
         celeb_data["name"] = name_input.lower()
         await state.update_data(celebrity=celeb_data, orig_message_text=orig_msg_new_text)
@@ -133,8 +136,6 @@ async def name_edited(message: Message, state: FSMContext, celebrity_service: Ce
 
 
 async def new_param_chosen(call: CallbackQuery, state: FSMContext, celebrity_service: CelebrityService):
-    await call.answer()
-
     prefix, new_value = call.data.split(":", 1)
     new_value = re.sub(r'[^\w\s]', '', new_value, flags=re.UNICODE)
     new_value = new_value.strip().lower()
@@ -151,27 +152,39 @@ async def new_param_chosen(call: CallbackQuery, state: FSMContext, celebrity_ser
     if param_to_use == "new_geo":
         new_value = geo_synonyms.get(new_value).capitalize()
     if param_to_use == "new_status":
-        new_value = "согласована" if new_value == "approved" else "нельзя использовать"
+        new_value = "согласована✅" if new_value == "approved" else "нельзя использовать⛔"
 
     orig_msg_new_text = replace_param_in_text(text=orig_message_text, **{param_to_use: new_value})
-    try:
-        await call.bot.edit_message_text(text=orig_msg_new_text, chat_id=call.message.chat.id, message_id=orig_message_id)
-    except TelegramBadRequest:
-        pass
 
     try:
         updated = await celebrity_service.update_celebrity(**celeb_data, **{param_to_use: new_value})
-        push_row(updated)
+        if updated:
+            push_row(updated)
+        elif updated is None:
+            await call.answer("❌ Ошибка при обновлении записи.", show_alert=True)
+            return
+
+        try:
+            await call.bot.edit_message_text(text=orig_msg_new_text, chat_id=call.message.chat.id,
+                                             message_id=orig_message_id)
+        except TelegramBadRequest:
+            pass
 
         if param_to_use == "new_geo":
             celeb_data["geo"] = new_value
         if param_to_use == "new_status":
             celeb_data["status"] = new_value
+            cat, geo, name, status = celeb_data["category"], celeb_data["geo"], celeb_data["name"], celeb_data["status"]
+            if cat.lower() == 'все':
+                updated_others = await celebrity_service.sync_status_from_universal(geo, name, status)
+                for celeb in updated_others:
+                    push_row(celeb)
         if param_to_use == "new_cat":
             celeb_data["category"] = new_value
+
+        await call.answer()
         await state.update_data(celebrity=celeb_data, orig_message_text=orig_msg_new_text)
 
-        await state.update_data(celebrity=celeb_data,orig_message_text=orig_msg_new_text)
     except UniqueViolationError as e:
         logger.error(e)
 
@@ -221,7 +234,10 @@ async def show_edit_menu(bot, chat_id, state):
 async def edit_back_button_handler(call: CallbackQuery, state: FSMContext):
     if call.data == "edit:back":
         await call.answer()
-        await call.message.delete()
+        try:
+            await call.message.delete()
+        except TelegramBadRequest:
+            pass
         await show_edit_menu(call.bot, call.message.chat.id, state)
         return
 
@@ -271,7 +287,7 @@ async def delete_request_handler(call: CallbackQuery, requests_service: Requests
     await call.answer(text="Заявка удалена")
 
 
-async def send_request_to_moderator(name_input: str, category: str, geo: str, prompt_id: int, username:str, message: Message, requests_service: RequestsService, subscribers_service: SubscribersService):
+async def send_request_to_moderator(name_input: str, category: str, geo: str, prompt_id: int, username:str, message: Message, requests_service: RequestsService, subscribers_service: SubscribersService, send_answer=True):
     moderators = await subscribers_service.get_moderators()
     observers = await subscribers_service.get_observers()
     moderators.append(ADMIN_ID)
@@ -333,8 +349,10 @@ async def handle_request_moderator(call, requests_service: RequestsService, cele
     pending = await requests_service.pop_pending_request(int(req_id))
     if not pending:
         await call.answer("Заявка не найдена или уже обработана", show_alert=True)
-        await call.message.delete()
-        return
+        try:
+            await call.message.delete()
+        except TelegramBadRequest:
+            pass
 
     chat_id = pending.get("chat_id")
     message_id = pending.get("message_id")
@@ -348,6 +366,11 @@ async def handle_request_moderator(call, requests_service: RequestsService, cele
     name, category, geo, status = map(lambda x: x.lower() if x else '', (name, category, geo, status))
     handled = await celebrity_service.insert_celebrity(name, category, geo, status)
     handled.update({"chat_id": chat_id, "message_id": message_id, "prompt_id": prompt_id})
+
+    if category.lower() == 'все':
+        updated = await celebrity_service.sync_status_from_universal(geo, name, status)
+        for celeb in updated:
+            push_row(celeb)
 
     push_row(handled)
 

@@ -1,4 +1,3 @@
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from synonyms import geo_flags, category_synonyms
@@ -29,8 +28,11 @@ def get_categories_keyboard(back_button_callback_data:str, action_type:str = "ca
     categories = sorted(set(category_synonyms.values()))
     kb = InlineKeyboardBuilder()
     for cat in categories:
-        if cat.strip().lower() == "жкт":
+        cat_l = cat.strip().lower()
+        if cat_l == "жкт":
             label = "ЖКТ"
+        elif cat_l == 'все':
+            label = 'Все категории'
         else:
             label = " ".join(word.capitalize() for word in cat.split())
         kb.button(text=label, callback_data=f"{action_type}:{cat}")

@@ -80,3 +80,21 @@ def split_names(raw: str) -> list[str]:
     parts = re.split(r'[,;\n]+', raw, flags=re.UNICODE)
     return [p.strip().lower() for p in parts if p.strip()]
 
+
+def build_card_text(celeb: dict) -> str:
+    name = celeb["name"]
+    status = celeb["status"]
+    geo = celeb["geo"]
+    raw_cat = celeb["category"]
+    category = raw_cat.strip().lower()
+    display_category = "ЖКТ" if category == "жкт" else category.title()
+    emoji = "✅" if status.lower() == "согласована" else "⛔"
+    lines = [
+        f"Селеба: {name.title()}",
+    ]
+
+    lines.append(f"Статус: {status.title()}{emoji}"),
+    lines.append(f"Категория: {display_category}")
+    lines.append(f"Гео: {geo.title()}")
+
+    return "\n".join(lines)

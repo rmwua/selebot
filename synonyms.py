@@ -90,6 +90,10 @@ category_synonyms = {
     "красота": "омоложение",
     "beauty": "омоложение",
     "beauty/rejuvenation": "омоложение",
+
+    "все категории": "все",
+    "все": "все",
+    "all": "все",
 }
 
 geo_synonyms = {

@@ -97,9 +97,9 @@ async def main():
     dp.callback_query.register(similar_celebs_handler, F.data.startswith("similar:"))
 
     dp.callback_query.register(edit_handler, F.data == "edit")
+    dp.callback_query.register(edit_back_button_handler, F.data == "edit:back")
     dp.callback_query.register(field_chosen, F.data.startswith("edit_field:"), StateFilter(EditCelebrity.choosing_field))
     dp.message.register(name_edited, StateFilter(EditCelebrity.editing_name))
-    dp.callback_query.register(edit_back_button_handler, F.data == "edit:back")
     dp.callback_query.register(new_param_chosen, F.data.startswith("edit_cat:") | F.data.startswith("edit_geo:") | F.data.startswith("edit_status"),StateFilter(EditCelebrity.editing_param))
     dp.callback_query.register(delete_celebrity_handler, F.data == "edit:delete", StateFilter(EditCelebrity.deleting_entry))
 

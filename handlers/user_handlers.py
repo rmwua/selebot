@@ -14,25 +14,9 @@ from keyboards import get_new_search_button, get_geo_keyboard, get_categories_ke
 from states import SearchMenu
 
 from synonyms import category_synonyms, geo_synonyms
-from utils import is_moderator, split_names
+from utils import is_moderator, split_names, build_card_text
 
 logger = config.logger
-
-
-def build_card_text(celeb: dict) -> str:
-    name = celeb["name"]
-    status = celeb["status"]
-    geo = celeb["geo"]
-    raw_cat = celeb["category"]
-    category = raw_cat.strip().lower()
-    display_category = "ЖКТ" if category == "жкт" else category.title()
-    emoji = "✅" if status.lower() == "согласована" else "⛔"
-    return "\n".join([
-        f"Селеба: {name.title()}",
-        f"Статус: {status.title()}{emoji}",
-        f"Категория: {display_category}",
-        f"Гео: {geo.title()}",
-    ])
 
 
 async def cmd_start(message: types.Message, subscribers_service: SubscribersService, state: FSMContext, command_manager: CommandManager, bot:Bot):
@@ -143,7 +127,12 @@ async def name_entered(message: types.Message, state: FSMContext, celebrity_serv
     names = split_names(message.text)
     if len(names) == 1:
         name_input = names[0]
-        return await handle_request(name_input, cat, geo, message, state, celebrity_service, requests_service, subscribers_service)
+        if cat == 'все':
+            return await handle_all_categories(name_input, geo, message, state, celebrity_service, requests_service,
+                                        subscribers_service)
+        return await handle_request(name_input, cat, geo, message, state, celebrity_service, requests_service,
+                                 subscribers_service)
+
     return await handle_batch_request(names, cat, geo, message, state, celebrity_service, requests_service, subscribers_service)
 
 
@@ -166,7 +155,75 @@ async def manual_handler(message: types.Message, state: FSMContext, celebrity_se
     if geo is None:
         return await message.answer("Знаменитость не согласована. Данного гео пока нет.", reply_markup=new_search_b.as_markup())
 
-    await handle_request(name_input, category, geo, message, state, celebrity_service, requests_service, subscribers_service)
+    if category == 'все':
+        await handle_all_categories(name_input, geo, message, state, celebrity_service, requests_service, subscribers_service)
+    else:
+        logger.warning(f"CAT: {category}")
+        await handle_request(name_input, category, geo, message, state, celebrity_service, requests_service, subscribers_service)
+
+
+async def handle_all_categories(name_input: str, geo: str, message: types.Message, state: FSMContext, celebrity_service: CelebrityService, requests_service: RequestsService, subscribers_service: SubscribersService):
+    data = await state.get_data()
+    prompt_id = data.get('prompt_message_id')
+    username = message.from_user.username
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+    categories = sorted(set(category_synonyms.values()))
+    lines = [f"Селеба: {name_input.title()}", f"Гео: {geo.title()}\n", f"\nКатегория: Все"]
+    text = None
+    approved = []
+    banned = []
+    req_id = None
+    show_celebs = False
+    check_other_cats = True
+    show_edit_button = False
+
+    for cat in categories:
+        if cat == 'все':
+            matched = await celebrity_service.find_celebrity(name_input, cat, geo)
+            if matched:
+                status = matched['status'] or matched[0]['status']
+                text = build_card_text(matched)
+                if status == 'нельзя использовать':
+                    text += "\nВы можете ознакомиться с доступным списком селеб по данному гео/категории:"
+                    show_celebs = True
+                    await state.update_data(geo=geo, cat=cat)
+
+                check_other_cats = False
+                show_edit_button = True
+            else:
+                req_id = await send_request_to_moderator(name_input, cat, geo, prompt_id, username, message, requests_service,
+                                                subscribers_service)
+        if check_other_cats:
+            matched = await celebrity_service.find_celebrity(name_input, cat, geo)
+            if matched:
+                status = matched['status'] or matched[0]['status']
+                if status == 'согласована':
+                    approved.append(cat)
+                elif status == 'нельзя использовать':
+                    banned.append(cat)
+    if check_other_cats:
+        if len(approved) == len(categories) - 1:
+            lines.append("Согласована✅ по всем категориям")
+        elif len(banned) == len(categories) - 1:
+            lines.append("Нельзя использовать⛔ по всем категориям")
+        else:
+            if len(approved) > 0:
+                lines.append(f"Согласована✅: {', '.join(approved)}")
+            if len(banned) > 0:
+                lines.append(f"Нельзя использовать⛔: {', '.join(banned)}")
+            if req_id is not None:
+                lines.append("\nЗапрос по всем категориям отправлен модератору🟡")
+
+    kb = get_new_search_button(is_moderator=is_moderator(user_id), show_edit_button=show_edit_button, show_celebs=show_celebs)
+    kb.adjust(1)
+    if not text:
+        text = "\n".join(lines)
+    await message.answer(text=text, reply_markup=kb.as_markup())
+    try:
+        await message.bot.delete_message(chat_id=chat_id, message_id=prompt_id)
+    except TelegramBadRequest:
+        pass
 
 
 async def handle_batch_request(names: list, category: str, geo: str, message: types.Message, state: FSMContext, celebrity_service: CelebrityService, requests_service: RequestsService, subscribers_service: SubscribersService):
@@ -176,8 +233,6 @@ async def handle_batch_request(names: list, category: str, geo: str, message: ty
 
     batch_similar_map: dict[int, list[dict]] = {}
     data = await state.get_data()
-    prompt_id = data.get('prompt_message_id')
-    chat_id = message.chat.id
 
     for idx, name in enumerate(names):
         matched = await celebrity_service.find_celebrity(name, category, geo)

@@ -1,3 +1,4 @@
+import re
 from typing import Dict, Any, Union, List
 
 from config import logger
@@ -8,58 +9,69 @@ class CelebrityService:
     def __init__(self, pool):
         self.pool = pool
 
-    async def find_celebrity(self, name: str, category: str, geo: str) -> Union[Dict[str, Any], List[Dict[str, Any]], None]:
+    async def find_celebrity(self, name: str, category: str, geo: str) -> Union[
+        Dict[str, Any], List[Dict[str, Any]], None]:
         cyr = sanitize_cyr(name)
         asc = sanitize_ascii(name)
         cat = category.lower()
         loc = geo.lower()
         MIN_SIMILARITY = 0.8
 
+        params = [loc, cat, cyr, asc]
+        base_filter = """
+           WHERE lower(geo) = $1
+             AND (lower(category) = $2 OR lower(category) = 'все')
+        """
+
         async with self.pool.acquire() as conn:
-            # 1) exact
+            # 1) exact match
             row = await conn.fetchrow(
-                """
+                f"""
                 SELECT id, name, category, geo, status
                   FROM celebrities
-                 WHERE lower(category) = $1
-                   AND lower(geo)      = $2
+                  {base_filter}
                    AND (
                         normalized_name = $3
                      OR ascii_name      = $4
                    )
                 """,
-                cat, loc, cyr, asc
+                *params
             )
             if row:
-                return dict(row)
+                result = dict(row)
+                if result['category'] == 'все' and cat != 'все':
+                    result['category'] = cat
+                return result
 
-            # 2) substring
+            # 2) substring match
             rows = await conn.fetch(
-                """
+                f"""
                 SELECT id, name, category, geo, status
-                  FROM celebrities
-                 WHERE lower(category) = $1
-                   AND lower(geo)      = $2
+                    FROM celebrities
+                  {base_filter}
                    AND (
                         normalized_name LIKE '%' || $3 || '%'
                      OR ascii_name      LIKE '%' || $4 || '%'
                    )
                  LIMIT 5
                 """,
-                cat, loc, cyr, asc
+                *params
             )
             if rows:
-                return [dict(r) for r in rows]
+                result = []
+                for r in rows:
+                    rec = dict(r)
+                    if rec['category'] == 'все' and cat != 'все':
+                        rec['category'] = cat
+                    result.append(rec)
+                return result
 
-            # 3) fuzzy via pg_trgm
+            # 3) fuzzy match
             rows = await conn.fetch(
-                """
+                f"""
                 SELECT id, name, category, geo, status
-                  FROM celebrities
-                 WHERE lower(category) = $1
-                   AND lower(geo)      = $2
-                   -- % оставляем, чтобы быстро отсечь совсем чужие записи,
-                   -- но дополнительно проверяем similarity > MIN_SIMILARITY
+                    FROM celebrities
+                  {base_filter}
                    AND (
                         normalized_name % $3
                      OR ascii_name      % $4
@@ -75,9 +87,16 @@ class CelebrityService:
                    ) DESC
                  LIMIT 5
                 """,
-                cat, loc, cyr, asc, MIN_SIMILARITY
+                *params, MIN_SIMILARITY
             )
-            return [dict(r) for r in rows] if rows else None
+            if rows:
+                result = []
+                for r in rows:
+                    rec = dict(r)
+                    if rec['category'] == 'все' and cat != 'все':
+                        rec['category'] = cat
+                    result.append(rec)
+                return result
 
     async def insert_celebrity(self, name: str, category: str, geo: str, status: str) -> dict:
         """
@@ -109,6 +128,9 @@ class CelebrityService:
             return dict(row)
 
     async def get_celebrities(self, geo:str , cat: str) -> list[str] | None:
+        """
+        Returns all celebrities by geo and category with status = 'approved'
+        """
         async with self.pool.acquire() as conn:
             sql = """
             SELECT DISTINCT name 
@@ -134,7 +156,7 @@ class CelebrityService:
 
 
     async def update_celebrity(self, name: str, geo: str, category: str, status: str, new_name=None, new_geo=None,
-                               new_cat=None, new_status=None) -> dict[Any, Any]:
+                               new_cat=None, new_status=None) -> dict[Any, Any] or None:
         updates = {}
         if new_name:
             updates["name"] = new_name.lower()
@@ -145,6 +167,7 @@ class CelebrityService:
         if new_geo:
             updates["geo"] = new_geo.lower()
         if new_status:
+            new_status = re.sub(r'[^a-zA-Zа-яА-Я0-9\s]', '', new_status).strip().lower()
             updates["status"] = new_status.lower()
 
         set_clauses = []
@@ -173,7 +196,7 @@ class CelebrityService:
 
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow(query, *params)
-            return dict(row)
+            return dict(row) if row else None
 
     async def delete_celebrity(self, name: str, geo: str, category: str, status: str) -> None:
 
@@ -215,3 +238,22 @@ class CelebrityService:
     async def delete_by_id(self, rec_id: int) -> None:
         async with self.pool.acquire() as conn:
             await conn.execute("DELETE FROM celebrities WHERE id = $1", rec_id)
+
+    async def sync_status_from_universal(self, geo:str, name:str, status:str) -> list[dict]:
+        """
+        Synchronises status for geo and category with universal status.
+        """
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                UPDATE celebrities
+                SET status = $3
+                WHERE name = $1 
+                  AND geo = $2 
+                  AND category != 'все'
+                  AND status IS DISTINCT FROM $3
+                RETURNING id, name, category, geo, status;
+                """,
+                name, geo, status
+            )
+            return [dict(row) for row in rows]
