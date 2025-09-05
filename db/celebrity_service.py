@@ -1,7 +1,6 @@
 import re
 from typing import Dict, Any, Union, List
 
-from config import logger
 from utils import sanitize_cyr, sanitize_ascii
 
 
@@ -27,7 +26,7 @@ class CelebrityService:
             # 1) exact match
             row = await conn.fetchrow(
                 f"""
-                SELECT id, name, category, geo, status
+                SELECT id, name, category, geo, status, reason
                   FROM celebrities
                   {base_filter}
                    AND (
@@ -46,7 +45,7 @@ class CelebrityService:
             # 2) substring match
             rows = await conn.fetch(
                 f"""
-                SELECT id, name, category, geo, status
+                SELECT id, name, category, geo, status, reason
                     FROM celebrities
                   {base_filter}
                    AND (
@@ -69,7 +68,7 @@ class CelebrityService:
             # 3) fuzzy match
             rows = await conn.fetch(
                 f"""
-                SELECT id, name, category, geo, status
+                SELECT id, name, category, geo, status, reason
                     FROM celebrities
                   {base_filter}
                    AND (
@@ -98,7 +97,7 @@ class CelebrityService:
                     result.append(rec)
                 return result
 
-    async def insert_celebrity(self, name: str, category: str, geo: str, status: str) -> dict:
+    async def insert_celebrity(self, name: str, category: str, geo: str, status: str, reason: str = None) -> dict:
         """
         Вставляет (или обновляет) селебу, заполняя сразу normalized_name и ascii_name.
         """
@@ -109,13 +108,13 @@ class CelebrityService:
             row = await conn.fetchrow(
                 """
                 INSERT INTO celebrities
-                  (name, normalized_name, ascii_name, category, geo, status)
+                  (name, normalized_name, ascii_name, category, geo, status, reason)
                 VALUES
                   (
                     $1,
                     $2,  -- normalized_name
                     $3,  -- ascii_name
-                    $4, $5, $6
+                    $4, $5, $6, $7
                   )
                 ON CONFLICT (name, category, geo) DO UPDATE
                   SET status          = EXCLUDED.status,
@@ -123,7 +122,7 @@ class CelebrityService:
                       ascii_name      = EXCLUDED.ascii_name
                 RETURNING id, name, category, geo, status;
                 """,
-                name, cyr_name, ascii_val, category, geo, status
+                name, cyr_name, ascii_val, category, geo, status, reason
             )
             return dict(row)
 
@@ -156,7 +155,7 @@ class CelebrityService:
 
 
     async def update_celebrity(self, name: str, geo: str, category: str, status: str, new_name=None, new_geo=None,
-                               new_cat=None, new_status=None) -> dict[Any, Any] or None:
+                               new_cat=None, new_status=None, new_reason=None) -> dict[Any, Any] or None:
         updates = {}
         if new_name:
             updates["name"] = new_name.lower()
@@ -169,6 +168,8 @@ class CelebrityService:
         if new_status:
             new_status = re.sub(r'[^a-zA-Zа-яА-Я0-9\s]', '', new_status).strip().lower()
             updates["status"] = new_status.lower()
+        if new_reason:
+            updates["reason"] = new_reason.lower().strip()
 
         set_clauses = []
         set_values = []
@@ -189,7 +190,7 @@ class CelebrityService:
             UPDATE celebrities
             SET {set_sql}
             WHERE {where_sql}
-            RETURNING id, name, category, geo, status;
+            RETURNING id, name, category, geo, status, reason;
         """
 
         params = set_values + where_values
@@ -239,7 +240,7 @@ class CelebrityService:
         async with self.pool.acquire() as conn:
             await conn.execute("DELETE FROM celebrities WHERE id = $1", rec_id)
 
-    async def sync_status_from_universal(self, geo:str, name:str, status:str) -> list[dict]:
+    async def sync_status_from_universal(self, geo:str, name:str, status:str, reason:str = None) -> list[dict]:
         """
         Synchronises status for geo and category with universal status.
         """
@@ -247,13 +248,14 @@ class CelebrityService:
             rows = await conn.fetch(
                 """
                 UPDATE celebrities
-                SET status = $3
+                SET status = $3,
+                    reason = $4
                 WHERE name = $1 
                   AND geo = $2 
                   AND category != 'все'
                   AND status IS DISTINCT FROM $3
-                RETURNING id, name, category, geo, status;
+                RETURNING id, name, category, geo, status, reason;
                 """,
-                name, geo, status
+                name, geo, status, reason
             )
             return [dict(row) for row in rows]

@@ -9,12 +9,12 @@ from db.requests_service import RequestsService
 from db.service_middleware import ServiceMiddleware
 from db.subscribers_service import SubscribersService
 from filters import AdminModObserverFilter
-from handlers.moderator_handlers import edit_handler, field_chosen, name_edited, edit_back_button_handler, \
+from handlers.moderator_handlers import edit_handler, field_chosen, edit_back_button_handler, \
     new_param_chosen, delete_celebrity_handler, delete_request_handler, cmd_requests, cmd_users, cmd_role, \
-    cancel_role_handler, cmd_role_receive_user_id, resume_role_changing_handler, role_chosen_handler
+    cancel_role_handler, cmd_role_receive_user_id, resume_role_changing_handler, role_chosen_handler, \
+    name_or_reason_edited, process_reason, handle_request_moderator
 from handlers.user_handlers import (
     cmd_search, cmd_start,
-    callback_handler,
     mode_chosen,
     geo_chosen,
     cat_chosen,
@@ -23,7 +23,7 @@ from handlers.user_handlers import (
     manual_handler, back_handler, new_search_handler, available_celebs_handler, cmd_approved, cancel_handler,
     approved_geo_chosen_handler, back_to_approved_handler, approved_cat_chosen_handler, similar_celebs_handler,
 )
-from states import EditCelebrity, EditUserRole
+from states import EditCelebrity, EditUserRole, ModeratingStates
 from command_manager import CommandManager
 
 
@@ -90,7 +90,7 @@ async def main():
     dp.callback_query.register(cat_chosen, F.data.startswith("cat:"), StateFilter(SearchMenu.choosing_cat))
     dp.callback_query.register(available_celebs_handler, F.data == "available_celebs")
 
-    dp.callback_query.register(callback_handler, F.data.startswith("approve:") | F.data.startswith("ban:"))
+    dp.message.register(process_reason, StateFilter(ModeratingStates.awaiting_reason))
     dp.callback_query.register(back_to_approved_handler, F.data == "back:approved", StateFilter(SearchMenu.choosing_cat))
     dp.callback_query.register(back_handler,F.data.startswith("back:"))
     dp.callback_query.register(new_search_handler,F.data == "new_search")
@@ -99,9 +99,12 @@ async def main():
     dp.callback_query.register(edit_handler, F.data == "edit")
     dp.callback_query.register(edit_back_button_handler, F.data == "edit:back")
     dp.callback_query.register(field_chosen, F.data.startswith("edit_field:"), StateFilter(EditCelebrity.choosing_field))
-    dp.message.register(name_edited, StateFilter(EditCelebrity.editing_name))
+    dp.message.register(name_or_reason_edited, StateFilter(EditCelebrity.editing_name, EditCelebrity.editing_reason))
     dp.callback_query.register(new_param_chosen, F.data.startswith("edit_cat:") | F.data.startswith("edit_geo:") | F.data.startswith("edit_status"),StateFilter(EditCelebrity.editing_param))
     dp.callback_query.register(delete_celebrity_handler, F.data == "edit:delete", StateFilter(EditCelebrity.deleting_entry))
+
+    dp.callback_query(F.data.startswith("approve:"))(handle_request_moderator)
+    dp.callback_query(F.data.startswith("ban:"))(handle_request_moderator)
 
     dp.callback_query.register(approved_geo_chosen_handler, F.data.startswith("geo_approved"), StateFilter(SearchMenu.choosing_geo))
     dp.callback_query.register(approved_cat_chosen_handler, F.data.startswith("cat_approved"))

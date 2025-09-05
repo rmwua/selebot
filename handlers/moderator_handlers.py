@@ -16,7 +16,7 @@ from keyboards import get_new_search_button, get_edit_keyboard, get_categories_k
     cancel_role_change_kb
 from models import USER_ROLES
 from sheets_client import push_row, delete_row_by_id
-from states import EditCelebrity, EditUserRole
+from states import EditCelebrity, EditUserRole, ModeratingStates
 from synonyms import geo_synonyms
 from utils import is_moderator, replace_param_in_text, parse_celebrity_from_msg, set_subscriber_username
 
@@ -102,30 +102,45 @@ async def field_chosen(call: CallbackQuery, state: FSMContext):
         confirm_kb.adjust(2)
         await call.message.edit_text("Точно удаляем эту Селебу?", reply_markup=confirm_kb.as_markup())
 
-    await state.update_data(editing_param_msg_id=call.message.message_id)
+    if field == "reason":
+        await state.set_state(EditCelebrity.editing_reason)
+        back_kb = InlineKeyboardBuilder()
+        back_kb.button(text="🔙 Назад", callback_data="edit:back")
+        back_kb.adjust(1)
+        await call.message.edit_text("Введите новую причину:", reply_markup=back_kb.as_markup())
+
+    await state.update_data(editing_param_msg_id=call.message.message_id, editing_field=field)
 
 
-async def name_edited(message: Message, state: FSMContext, celebrity_service: CelebrityService):
+async def name_or_reason_edited(message: Message, state: FSMContext, celebrity_service: CelebrityService):
     data = await state.get_data()
-    name_input = message.text.strip()
+    new_value = message.text.strip()
     celeb_data = data.get("celebrity")
     orig_message_id = data.get("orig_message_id")
     orig_message_text = data.get("orig_message_text")
     editing_param_msg_id = data.get("editing_param_msg_id")
+    editing_field = data.get("editing_field")
 
-    orig_msg_new_text = replace_param_in_text(text=orig_message_text, new_name=name_input)
-    await message.bot.delete_message(message_id=editing_param_msg_id, chat_id=message.chat.id)
-    await message.bot.edit_message_text(text=orig_msg_new_text, chat_id=message.chat.id, message_id=orig_message_id)
+    param_key = "new_name" if editing_field == "name" else "new_reason"
+    kwargs = {param_key: new_value}
 
     try:
-        updated = await celebrity_service.update_celebrity(**celeb_data, new_name=name_input.lower())
+        updated = await celebrity_service.update_celebrity(**celeb_data, **kwargs)
         if updated:
             push_row(updated)
         else:
             await message.answer("❌ Ошибка при обновлении записи.")
 
-        celeb_data["name"] = name_input.lower()
+        if editing_field == "name":
+            celeb_data["name"] = new_value.lower()
+        elif editing_field == "reason":
+            celeb_data["reason"] = new_value.lower()
+
+        orig_msg_new_text = replace_param_in_text(text=orig_message_text, **kwargs)
+        await message.bot.delete_message(message_id=editing_param_msg_id, chat_id=message.chat.id)
+        await message.bot.edit_message_text(text=orig_msg_new_text, chat_id=message.chat.id, message_id=orig_message_id)
         await state.update_data(celebrity=celeb_data, orig_message_text=orig_msg_new_text)
+
     except UniqueViolationError as e:
         logger.error(e)
     except Exception as e:
@@ -342,7 +357,7 @@ async def send_request_to_moderator(name_input: str, category: str, geo: str, pr
     return request_id
 
 
-async def handle_request_moderator(call, requests_service: RequestsService, celebrity_service: CelebrityService):
+async def handle_request_moderator(call, requests_service: RequestsService, celebrity_service: CelebrityService, state:FSMContext):
     action, req_id = call.data.split(":", 1)
     is_approve = (action == "approve")
 
@@ -353,26 +368,38 @@ async def handle_request_moderator(call, requests_service: RequestsService, cele
             await call.message.delete()
         except TelegramBadRequest:
             pass
+        return
 
-    chat_id = pending.get("chat_id")
-    message_id = pending.get("message_id")
-    name     = pending.get("celebrity_name")
-    category = pending.get("category")
-    geo      = pending.get("geo")
-    prompt_id = pending.get("bot_message_id")
-    username = pending.get("username")
-    status = "Согласована" if is_approve else "Нельзя Использовать"
+    data = {
+        "chat_id": pending["chat_id"],
+        "message_id": pending["message_id"],
+        "prompt_id": pending["bot_message_id"],
+        "username": pending["username"],
+        "name":     pending["celebrity_name"].lower(),
+        "category": pending["category"].lower(),
+        "geo":      pending["geo"].lower(),
+        "status":   "согласована" if is_approve else "нельзя использовать",
+        "req_id":   int(req_id),
+        "reason":   None,
+    }
 
-    name, category, geo, status = map(lambda x: x.lower() if x else '', (name, category, geo, status))
-    handled = await celebrity_service.insert_celebrity(name, category, geo, status)
-    handled.update({"chat_id": chat_id, "message_id": message_id, "prompt_id": prompt_id})
+    if not is_approve:
+        await state.set_state(ModeratingStates.awaiting_reason)
+        await state.update_data(**data)
+        msg = await call.bot.send_message(chat_id=call.message.chat.id, text="⛔ Укажите причину, почему нельзя использовать:")
+        await state.update_data(reason_prompt_msg_id=msg.message_id)
+        return
 
-    if category.lower() == 'все':
-        updated = await celebrity_service.sync_status_from_universal(geo, name, status)
+    inserted = await celebrity_service.insert_celebrity(data["name"], data["category"], data["geo"], data["status"])
+    data["inserted"] = inserted
+
+    if data["category"].lower() == 'все':
+        updated = await celebrity_service.sync_status_from_universal(data["geo"], data["name"], data["status"])
+        data["synced"] = updated
         for celeb in updated:
             push_row(celeb)
 
-    push_row(handled)
+    push_row(inserted)
 
     message_ids = PENDING_MESSAGES.get(int(req_id), [])
     for msg_info in message_ids:
@@ -381,11 +408,11 @@ async def handle_request_moderator(call, requests_service: RequestsService, cele
                 chat_id=msg_info["chat_id"],
                 message_id=msg_info["message_id"],
                 text=f"<b>Заявка обработана:</b>\n\n"
-                     f"Имя: {name.title()}\n"
-                     f"Категория: {category.title()}\n"
-                     f"Гео: {geo.title()}\n"
-                     f"Статус: {status.title()}\n"
-                     f"Номер Заявки: {req_id}\nЮзер: @{username}\n"
+                     f"Имя: {data["name"].title()}\n"
+                     f"Категория: {data["category"].title()}\n"
+                     f"Гео: {data["geo"].title()}\n"
+                     f"Статус: {data["status"].title()}\n"
+                     f"Номер Заявки: {data["req_id"]}\nЮзер: @{data["username"]}\n"
                      f"<b>Статус и данные по селебе занесены в БД</b>",
                 parse_mode="HTML",
             )
@@ -395,7 +422,103 @@ async def handle_request_moderator(call, requests_service: RequestsService, cele
     if int(req_id) in PENDING_MESSAGES:
         del PENDING_MESSAGES[int(req_id)]
 
-    return handled
+    await callback_handler(data=data, state=state, bot=call.bot)
+    await state.clear()
+
+
+async def process_reason(message: Message, state: FSMContext, celebrity_service: CelebrityService):
+    reason = message.text.strip()
+    data = await state.get_data()
+    data.update(reason=reason)
+    reason_msg_id = data.get("reason_prompt_msg_id")
+    if reason_msg_id:
+        try:
+            await message.bot.delete_message(chat_id=message.chat.id, message_id=reason_msg_id)
+        except TelegramBadRequest:
+            pass
+
+    inserted = await celebrity_service.insert_celebrity(
+        name=data["name"],
+        category=data["category"],
+        geo=data["geo"],
+        status=data["status"],
+        reason=reason
+    )
+
+    if data["category"] == "все":
+        updated = await celebrity_service.sync_status_from_universal(data["geo"], data["name"], data["status"], reason)
+        data["synced"] = updated
+        for row in updated:
+            push_row(row)
+
+    push_row(inserted)
+
+    for msg_info in PENDING_MESSAGES.get(data["req_id"], []):
+        try:
+            await message.bot.edit_message_text(
+                chat_id=msg_info["chat_id"],
+                message_id=msg_info["message_id"],
+                text=f"<b>Заявка обработана:</b>\n\n"
+                     f"Имя: {data["name"].title()}\n"
+                     f"Категория: {data["category"].title()}\n"
+                     f"Гео: {data["geo"].title()}\n"
+                     f"Статус: {data["status"].title()} ⛔\n"
+                     f"Причина: {reason}\n"
+                     f"Номер Заявки: {data["req_id"]}\nЮзер: @{data["username"]}\n"
+                     f"<b>Статус и данные по селебе занесены в БД</b>",
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            logger.warning(f"Failed to edit request message {msg_info}", exc_info=e)
+
+    PENDING_MESSAGES.pop(data["req_id"], None)
+
+    await message.answer("❌ Причина добавлена, селеба занесена.")
+    await callback_handler(data=data, state=state, bot=message.bot)
+    await state.clear()
+
+
+async def callback_handler(data: dict, state: FSMContext=None, bot: Bot = None):
+    name = data["name"]
+    category = data["category"]
+    geo = data["geo"]
+    status = data["status"]
+    chat_id = data["chat_id"]
+    msg_id = data["message_id"]
+    prompt_id = data.get("prompt_id")
+    reason = data.get("reason")
+
+    emoji = "⛔" if status == "нельзя использовать" else "✅"
+    text = [
+        f"Статус для `{name.title()}` — *{status}{emoji}*\n"
+        f"Категория: {category.title()}\n"
+        f"Гео: {geo.title()}"
+    ]
+
+    show_celebs = False
+    logger.info(f"REASON: {reason}\nSTATUS: {status}\nCHAT ID: {chat_id}\nMESSAGE ID: {msg_id}")
+    if status == "нельзя использовать" and reason:
+        show_celebs = True
+        text.append(f"Причина: {reason}")
+        text.append("\nВы можете ознакомиться с доступным списком селеб по данному гео/категории:")
+        await state.update_data(geo=geo, cat=category)
+
+    kb = get_new_search_button(show_celebs=show_celebs or False)
+    text = "\n".join(text)
+
+    await bot.send_message(
+        chat_id=chat_id,
+        text=text,
+        parse_mode="Markdown",
+        reply_to_message_id=msg_id,
+        reply_markup=kb.as_markup()
+    )
+
+    if prompt_id:
+        try:
+            await bot.delete_message(chat_id=chat_id, message_id=prompt_id)
+        except TelegramBadRequest:
+            logger.error("Failed to delete prompt message")
 
 
 async def cmd_users(message: Message, subscribers_service: SubscribersService, bot: Bot):

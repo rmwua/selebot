@@ -47,6 +47,7 @@ def get_edit_keyboard():
     kb.button(text="Статус", callback_data="edit_field:status")
     kb.button(text="Категория", callback_data="edit_field:cat")
     kb.button(text="Гео", callback_data="edit_field:geo")
+    kb.button(text='Причина', callback_data="edit_field:reason")
     kb.button(text="❌Удалить", callback_data="edit_field:delete")
     kb.button(text="✅Готово", callback_data="edit_field:back")
     kb.adjust(2)

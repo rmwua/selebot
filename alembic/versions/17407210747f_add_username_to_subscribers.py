@@ -23,4 +23,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_column('subscribers', sa.Column('username', sa.String(), nullable=True))
+    op.drop_column('subscribers', 'username')

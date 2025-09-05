@@ -356,49 +356,6 @@ async def available_celebs_handler(call: types.CallbackQuery, celebrity_service:
         pass
 
 
-async def callback_handler(call: types.CallbackQuery, requests_service: RequestsService, celebrity_service: CelebrityService, state: FSMContext):
-    handled = await handle_request_moderator(call, requests_service, celebrity_service)
-    if not isinstance(handled, dict):
-        return
-
-    name     = handled["name"]
-    category = handled["category"]
-    geo      = handled["geo"]
-    chat_id  = handled["chat_id"]
-    msg_id   = handled["message_id"]
-    status =  handled["status"]
-    prompt_id = handled["prompt_id"]
-
-    emoji = "⛔" if status == "нельзя использовать" else "✅"
-    text = [
-        f"Статус для `{name.title()}` — *{status}{emoji}*\n"
-        f"Категория: {category.title()}\n"
-        f"Гео: {geo.title()}"
-    ]
-
-    show_celebs = False
-    if status == "нельзя использовать":
-        show_celebs = True
-        text.append("\nВы можете ознакомиться с доступным списком селеб по данному гео/категории:")
-        await state.update_data(geo=geo, cat=category)
-
-    kb = get_new_search_button(show_celebs=show_celebs or False)
-    text = "\n".join(text)
-
-    await call.bot.send_message(
-        chat_id=chat_id,
-        text=text,
-        parse_mode="Markdown",
-        reply_to_message_id=msg_id,
-        reply_markup=kb.as_markup()
-    )
-
-    try:
-        await call.bot.delete_message(chat_id=chat_id, message_id=prompt_id)
-    except TelegramBadRequest as e:
-        logger.error(e)
-
-
 async def back_handler(call: types.CallbackQuery, state: FSMContext):
     where = call.data.split(":", 1)[1]
     await call.answer()

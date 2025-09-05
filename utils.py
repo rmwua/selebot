@@ -12,22 +12,32 @@ def is_moderator(user_id: int) -> bool:
     return user_id == config.ADMIN_ID
 
 
-def replace_param_in_text(text: str, new_name:str=None, new_geo:str=None, new_status:str=None, new_cat:str=None) -> str:
+def replace_param_in_text(text: str, new_name:str=None, new_geo:str=None, new_status:str=None, new_cat:str=None, new_reason: str=None) -> str:
     params = {
         "селеба": new_name,
         "гео": new_geo,
         "статус": new_status,
         "категория": new_cat,
+        "причина": new_reason,
     }
+
     lines = text.splitlines()
+    keys_present = set()
     new_lines = []
 
     for line in lines:
         key = line.split(":", 1)[0].strip().lower()
+        keys_present.add(key)
+
         if key in params and params[key] is not None:
             new_lines.append(f"{key.capitalize()}: {params[key].capitalize()}")
         else:
             new_lines.append(line)
+
+    for key, value in params.items():
+        if value is not None and key not in keys_present:
+            new_lines.append(f"{key.capitalize()}: {value.capitalize()}")
+
     return "\n".join(new_lines)
 
 
@@ -87,6 +97,8 @@ def build_card_text(celeb: dict) -> str:
     geo = celeb["geo"]
     raw_cat = celeb["category"]
     category = raw_cat.strip().lower()
+    reason = celeb.get("reason") or None
+
     display_category = "ЖКТ" if category == "жкт" else category.title()
     emoji = "✅" if status.lower() == "согласована" else "⛔"
     lines = [
@@ -94,6 +106,8 @@ def build_card_text(celeb: dict) -> str:
     ]
 
     lines.append(f"Статус: {status.title()}{emoji}"),
+    if status.lower() == 'нельзя использовать' and reason:
+        lines.append(f"Причина: {reason}")
     lines.append(f"Категория: {display_category}")
     lines.append(f"Гео: {geo.title()}")
 
