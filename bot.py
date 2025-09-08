@@ -1,4 +1,7 @@
 import asyncio
+
+from aiogram.fsm.storage.memory import MemoryStorage
+
 import config
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, StateFilter
@@ -57,7 +60,7 @@ async def on_shutdown():
 
 async def main():
     bot = Bot(token=config.BOT_TOKEN)
-    dp = Dispatcher()
+    dp = Dispatcher(storage=MemoryStorage())
 
     await DatabaseManager.init()
     pool = await DatabaseManager.get_pool()

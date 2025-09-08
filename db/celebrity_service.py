@@ -120,7 +120,7 @@ class CelebrityService:
                   SET status          = EXCLUDED.status,
                       normalized_name = EXCLUDED.normalized_name,
                       ascii_name      = EXCLUDED.ascii_name
-                RETURNING id, name, category, geo, status;
+                RETURNING id, name, category, geo, status, reason;
                 """,
                 name, cyr_name, ascii_val, category, geo, status, reason
             )

@@ -59,7 +59,10 @@ async def field_chosen(call: CallbackQuery, state: FSMContext):
     if field == "back":
         data = await state.get_data()
         orig_message_id = data.get("orig_message_id")
-        await call.message.delete()
+        try:
+            await call.message.delete()
+        except TelegramBadRequest:
+            pass
         await state.clear()
 
         new_search_b = get_new_search_button(show_edit_button=True, is_moderator=is_moderator(user_id))
@@ -133,8 +136,6 @@ async def name_or_reason_edited(message: Message, state: FSMContext, celebrity_s
 
         if editing_field == "name":
             celeb_data["name"] = new_value.lower()
-        elif editing_field == "reason":
-            celeb_data["reason"] = new_value.lower()
 
         orig_msg_new_text = replace_param_in_text(text=orig_message_text, **kwargs)
         await message.bot.delete_message(message_id=editing_param_msg_id, chat_id=message.chat.id)
@@ -442,7 +443,7 @@ async def process_reason(message: Message, state: FSMContext, celebrity_service:
         category=data["category"],
         geo=data["geo"],
         status=data["status"],
-        reason=reason
+        reason=data["reason"],
     )
 
     if data["category"] == "все":
@@ -450,7 +451,6 @@ async def process_reason(message: Message, state: FSMContext, celebrity_service:
         data["synced"] = updated
         for row in updated:
             push_row(row)
-
     push_row(inserted)
 
     for msg_info in PENDING_MESSAGES.get(data["req_id"], []):
@@ -496,7 +496,6 @@ async def callback_handler(data: dict, state: FSMContext=None, bot: Bot = None):
     ]
 
     show_celebs = False
-    logger.info(f"REASON: {reason}\nSTATUS: {status}\nCHAT ID: {chat_id}\nMESSAGE ID: {msg_id}")
     if status == "нельзя использовать" and reason:
         show_celebs = True
         text.append(f"Причина: {reason}")

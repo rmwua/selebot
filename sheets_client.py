@@ -1,7 +1,6 @@
 import os
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
 
 SPREADSHEET_ID = os.environ["SPREADSHEET_ID"]
 SHEET_NAME     = os.getenv("SHEET_NAME", "celebrities")
@@ -41,7 +40,7 @@ def push_row(record: dict, sheet_row: int | None = None):
     # читаем IDs со 2-й по 1000-ю строку
     resp     = _sheets.values().get(
         spreadsheetId=SPREADSHEET_ID,
-        range=f"{SHEET_NAME}!A2:A1000"
+        range=f"{SHEET_NAME}!A2:A5000"
     ).execute()
     id_cells = resp.get("values", [])
 
@@ -95,7 +94,7 @@ def delete_row_by_id(record_id: int):
     # читаем IDs со 2-й по 1000-ю строку
     resp     = _sheets.values().get(
         spreadsheetId=SPREADSHEET_ID,
-        range=f"{SHEET_NAME}!A2:A1000"
+        range=f"{SHEET_NAME}!A2:A5000"
     ).execute()
     id_cells = resp.get("values", [])
 
