@@ -54,6 +54,7 @@ def sheet_webhook():
         category = data.get("category", "").strip().lower()
         geo      = geo_orig.lower()
         status   = data.get("status",   "").strip().lower()
+        reason   = data.get("reason", "").strip() or None
 
         if not all([name, category, geo, status]):
             abort(400, "Missing fields for upsert")
@@ -64,7 +65,8 @@ def sheet_webhook():
                     name=name,
                     category=category,
                     geo=geo,
-                    status=status
+                    status=status,
+                    reason=reason
                 )
             )
         else:
@@ -73,7 +75,8 @@ def sheet_webhook():
                     name=name,
                     category=category,
                     geo=geo,
-                    status=status
+                    status=status,
+                    reason=reason
                 )
             )
 

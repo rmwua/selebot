@@ -24,22 +24,23 @@ def export_postgres_to_sheets():
     with psycopg2.connect(DATABASE_URL) as conn:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT id, name, category, geo, status
+                SELECT id, name, category, geo, status, reason
                   FROM celebrities
                  ORDER BY id;
             """)
             rows = cur.fetchall()
 
     # 4) Формируем заголовок и данные
-    header = ["id", "name", "category", "geo", "status"]
+    header = ["id", "name", "category", "geo", "status", "reason"]
     rows_formatted = []
-    for (rid, name, cat, geo, status) in rows:
+    for (rid, name, cat, geo, status, reason) in rows:
         rows_formatted.append([
             rid,
             name.title(),
             cat,
             geo.title(),
-            status
+            status,
+            reason or ""
         ])
     values = [header] + rows_formatted
 

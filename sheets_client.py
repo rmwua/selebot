@@ -65,13 +65,14 @@ def push_row(record: dict, sheet_row: int | None = None):
         record["category"],
         record["geo"].title(),
         record["status"],
+        record.get("reason", "")
     ]]
 
     if target is None:
         # append в конец
         _sheets.values().append(
             spreadsheetId=SPREADSHEET_ID,
-            range=f"{SHEET_NAME}!A:E",
+            range=f"{SHEET_NAME}!A:F",
             valueInputOption="RAW",
             insertDataOption="INSERT_ROWS",
             body={"values": values}
@@ -80,7 +81,7 @@ def push_row(record: dict, sheet_row: int | None = None):
         # update по точному диапазону A{target}:E{target}
         _sheets.values().update(
             spreadsheetId=SPREADSHEET_ID,
-            range=f"{SHEET_NAME}!A{target}:E{target}",
+            range=f"{SHEET_NAME}!A{target}:F{target}",
             valueInputOption="RAW",
             body={"values": values}
         ).execute()

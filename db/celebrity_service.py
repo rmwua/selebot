@@ -210,7 +210,7 @@ class CelebrityService:
         async with self.pool.acquire() as conn:
             await conn.execute(query, *params)
 
-    async def update_by_id(self, rec_id: int, *, name: str, category: str, geo: str, status: str) -> dict:
+    async def update_by_id(self, rec_id: int, *, name: str, category: str, geo: str, status: str, reason: str = None) -> dict:
         """
         Обновляет запись по её id. Пересчитывает normalized_name и ascii_name.
         """
@@ -226,11 +226,12 @@ class CelebrityService:
                        ascii_name      = $4,
                        category        = $5,
                        geo             = $6,
-                       status          = $7
+                       status          = $7,
+                       reason          = $8
                  WHERE id = $1
-                RETURNING id, name, category, geo, status;
+                RETURNING id, name, category, geo, status, reason;
                 """,
-                rec_id, name, cyr_name, ascii_val, category, geo, status
+                rec_id, name, cyr_name, ascii_val, category, geo, status, reason
             )
             if not row:
                 raise ValueError(f"No celebrity with id={rec_id}")
