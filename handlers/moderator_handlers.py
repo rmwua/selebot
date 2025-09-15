@@ -211,6 +211,7 @@ async def new_param_chosen(call: CallbackQuery, state: FSMContext, celebrity_ser
 async def delete_celebrity_handler(call: CallbackQuery, state: FSMContext, celebrity_service: CelebrityService):
     await call.answer()
     data = await state.get_data()
+    logger.info(f"CELEB DATA: {data}")
     celeb_id = data.get("celeb_id")
     celeb_data = data.get("celebrity")
     orig_message_id = data.get("orig_message_id")

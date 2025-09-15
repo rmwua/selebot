@@ -9,7 +9,7 @@ from command_manager import CommandManager
 from db.celebrity_service import CelebrityService
 from db.requests_service import RequestsService
 from db.subscribers_service import SubscribersService
-from handlers.moderator_handlers import send_request_to_moderator, handle_request_moderator
+from handlers.moderator_handlers import send_request_to_moderator
 from keyboards import get_new_search_button, get_geo_keyboard, get_categories_keyboard
 from states import SearchMenu
 
@@ -158,7 +158,6 @@ async def manual_handler(message: types.Message, state: FSMContext, celebrity_se
     if category == 'все':
         await handle_all_categories(name_input, geo, message, state, celebrity_service, requests_service, subscribers_service)
     else:
-        logger.warning(f"CAT: {category}")
         await handle_request(name_input, category, geo, message, state, celebrity_service, requests_service, subscribers_service)
 
 
@@ -182,12 +181,14 @@ async def handle_all_categories(name_input: str, geo: str, message: types.Messag
         if cat == 'все':
             matched = await celebrity_service.find_celebrity(name_input, cat, geo)
             if matched:
-                status = matched['status'] or matched[0]['status']
-                text = build_card_text(matched)
+                celeb = matched[0] if isinstance(matched, list) else matched
+                status = celeb["status"]
+                text = build_card_text(celeb)
                 if status == 'нельзя использовать':
                     text += "\nВы можете ознакомиться с доступным списком селеб по данному гео/категории:"
                     show_celebs = True
-                    await state.update_data(geo=geo, cat=cat)
+                    celeb_id = celeb["id"]
+                    await state.update_data(geo=geo, cat=cat, celeb_id=celeb_id)
 
                 check_other_cats = False
                 show_edit_button = True
@@ -197,7 +198,7 @@ async def handle_all_categories(name_input: str, geo: str, message: types.Messag
         if check_other_cats:
             matched = await celebrity_service.find_celebrity(name_input, cat, geo)
             if matched:
-                status = matched['status'] or matched[0]['status']
+                status = matched["status"] if isinstance(matched, dict) else matched[0]["status"]
                 if status == 'согласована':
                     approved.append(cat)
                 elif status == 'нельзя использовать':
