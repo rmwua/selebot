@@ -97,6 +97,18 @@ class CelebrityService:
                     result.append(rec)
                 return result
 
+    async def get_by_id(self, id: int) -> dict:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT id, name, category, geo, status, reason
+                FROM celebrities
+                WHERE id = $1
+                """,
+                id
+            )
+            return dict(row) if row else None
+
     async def insert_celebrity(self, name: str, category: str, geo: str, status: str, reason: str = None) -> dict:
         """
         Вставляет (или обновляет) селебу, заполняя сразу normalized_name и ascii_name.

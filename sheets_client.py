@@ -86,6 +86,81 @@ def push_row(record: dict, sheet_row: int | None = None):
         ).execute()
 
 
+def push_rows(records: list[dict]):
+    # читаем все ID из таблицы
+    resp = _sheets.values().get(
+        spreadsheetId=SPREADSHEET_ID,
+        range=f"{SHEET_NAME}!A2:A5000"
+    ).execute()
+    id_cells = resp.get("values", [])
+
+    requests = []
+
+    for record in records:
+        str_id = str(record.get("id") or "")
+        sheet_row = record.get("_row")
+        target = None
+
+        if sheet_row:
+            target = int(sheet_row)
+        elif str_id:
+            # ищем строку с этим id
+            for i, row in enumerate(id_cells, start=2):
+                if row and row[0] == str_id:
+                    target = i
+                    break
+        if target is None:
+            # ищем первую пустую
+            for i, row in enumerate(id_cells, start=2):
+                if not row or not row[0]:
+                    target = i
+                    break
+
+        values = [
+            str_id,
+            record.get("name", "").title(),
+            record.get("category", ""),
+            record.get("geo", "").title(),
+            record.get("status", ""),
+            record.get("reason", "") or ""
+        ]
+
+        if target is None:
+            # append в конец
+            requests.append({
+                "appendCells": {
+                    "sheetId": _SHEET_ID,
+                    "rows": [{
+                        "values": [{"userEnteredValue": {"stringValue": str(v)}} for v in values]
+                    }],
+                    "fields": "userEnteredValue"
+                }
+            })
+        else:
+            # update существующей строки
+            requests.append({
+                "updateCells": {
+                    "rows": [{
+                        "values": [{"userEnteredValue": {"stringValue": str(v)}} for v in values]
+                    }],
+                    "fields": "userEnteredValue",
+                    "range": {
+                        "sheetId": _SHEET_ID,
+                        "startRowIndex": target - 1,
+                        "endRowIndex": target,
+                        "startColumnIndex": 0,
+                        "endColumnIndex": len(values),
+                    }
+                }
+            })
+
+    if requests:
+        _sheets.batchUpdate(
+            spreadsheetId=SPREADSHEET_ID,
+            body={"requests": requests}
+        ).execute()
+
+
 def delete_row_by_id(record_id: int):
     """
     Удаляет строку, где в столбце A лежит record_id, смещая все ниже вверх.
