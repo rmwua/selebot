@@ -1,16 +1,10 @@
 meta:
-  toolchain: {}
-app:
-  name: celebot
-  platform: python
-  entrypoint: /celebot/entrypoint.sh
-  env: {}
-  ports:
-    - 8000:8000
+  environment: docker
+  toolchain: docker
 
 build:
   dockerfile: Dockerfile
 
-resources:
-  cpu: 1
-  memory: 512mb
+run:
+  containerPort: 8000
+  command: /celebot/entrypoint.sh
