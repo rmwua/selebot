@@ -16,7 +16,7 @@ from keyboards import get_new_search_button, get_edit_keyboard, get_categories_k
     cancel_role_change_kb
 from models import USER_ROLES
 from sheets_client import push_row, delete_row_by_id
-from states import EditCelebrity, EditUserRole, ModeratingStates
+from states import EditCelebrity, EditUserRole, ModeratingStates, Upload
 from synonyms import geo_synonyms
 from utils import is_moderator, replace_param_in_text, parse_celebrity_from_msg, set_subscriber_username
 
@@ -665,3 +665,21 @@ async def role_chosen_handler(call: CallbackQuery, state: FSMContext, subscriber
 
     command_manager = CommandManager()
     await command_manager.set_commands_for_user(bot, user_id, new_role)
+
+
+async def cmd_upload(message: Message, state: FSMContext):
+    await state.clear()
+    await message.delete()
+    kb = InlineKeyboardBuilder()
+    kb.button(text="Подтвердить", callback_data="confirm_upload")
+    kb.button(text="Отмена", callback_data="cancel_upload")
+    await message.answer("Эта команда обновит гугл таблицу и выгрузит в нее всё из базы данных бота.\n"
+                         "Подтверждаете выгрузку?")
+
+async def upload_confirmed(state: FSMContext):
+    pass
+
+
+async def upload_cancelled(state: FSMContext):
+    await state.clear()
+

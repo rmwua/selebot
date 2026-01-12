@@ -15,7 +15,7 @@ from filters import AdminModObserverFilter
 from handlers.moderator_handlers import edit_handler, field_chosen, edit_back_button_handler, \
     new_param_chosen, delete_celebrity_handler, delete_request_handler, cmd_requests, cmd_users, cmd_role, \
     cancel_role_handler, cmd_role_receive_user_id, resume_role_changing_handler, role_chosen_handler, \
-    name_or_reason_edited, process_reason, handle_request_moderator
+    name_or_reason_edited, process_reason, handle_request_moderator, upload_confirmed, upload_cancelled
 from handlers.user_handlers import (
     cmd_search, cmd_start,
     mode_chosen,
@@ -26,7 +26,7 @@ from handlers.user_handlers import (
     manual_handler, back_handler, new_search_handler, available_celebs_handler, cmd_approved, cancel_handler,
     approved_geo_chosen_handler, back_to_approved_handler, approved_cat_chosen_handler, similar_celebs_handler,
 )
-from states import EditCelebrity, EditUserRole, ModeratingStates
+from states import EditCelebrity, EditUserRole, ModeratingStates, Upload
 from command_manager import CommandManager
 
 
@@ -114,6 +114,8 @@ async def main():
     dp.callback_query.register(cancel_handler, F.data == "cancel")
 
     dp.callback_query.register(delete_request_handler, F.data.startswith("delete:"))
+    dp.callback_query.register(upload_confirmed, F.data == "confirm_upload")
+    dp.callback_query.register(upload_cancelled, F.data == "cancel_upload")
 
 
     dp.startup.register(create_on_startup(dp, bot))

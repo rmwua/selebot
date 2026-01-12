@@ -12,7 +12,8 @@ class CommandManager:
         self.admin = self.common + [
             types.BotCommand(command="requests", description="Посмотреть активные заявки "),
             types.BotCommand(command="users", description="Посмотреть кто подписан на бота"),
-            types.BotCommand(command="role", description="Редактирование роли юзера")
+            types.BotCommand(command="role", description="Редактирование роли юзера"),
+            types.BotCommand(command="upload", description="Выгрузить из бд в таблицу")
         ]
 
         self.mod_observer = self.common + [

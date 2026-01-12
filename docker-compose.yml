@@ -24,7 +24,7 @@ services:
       - DATABASE_URL=postgresql://celebot_admin:meow-password@db:5432/celebrity_db
     command: python app.py
     ports:
-      - "8000:8000"
+      - "8080:8080"
 
   bot:
     build: .

@@ -28,3 +28,6 @@ class EditUserRole(StatesGroup):
 
 class ModeratingStates(StatesGroup):
     awaiting_reason = State()
+
+class Upload(StatesGroup):
+    confirm = State()
