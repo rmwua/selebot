@@ -10,6 +10,10 @@ from db.database_manager import DatabaseManager
 from db.celebrity_service import CelebrityService
 from sheets_client import push_row, push_rows
 
+import socket
+import urllib.request
+
+
 app = Flask(__name__)
 SHEET_WEBHOOK_SECRET = os.environ["SHEET_WEBHOOK_SECRET"]
 
@@ -125,6 +129,36 @@ def sheet_webhook():
     except Exception:
         logger.error("Error in /sheet-webhook:\n" + traceback.format_exc())
         return jsonify({"ok": False, "error": "Server error"}), 500
+
+
+@app.get("/diag/net")
+def diag_net():
+    out = {"ok": True, "checks": {}}
+
+    # DNS check
+    try:
+        ip = socket.gethostbyname("oauth2.googleapis.com")
+        out["checks"]["dns_oauth2"] = f"ok: {ip}"
+    except Exception as e:
+        out["ok"] = False
+        out["checks"]["dns_oauth2"] = f"fail: {type(e).__name__}: {e}"
+
+    # HTTPS check (quick)
+    try:
+        req = urllib.request.Request("https://oauth2.googleapis.com/token", method="POST")
+        # Мы не отправляем валидный токен-запрос - нам важно, что соединение вообще установится.
+        # Ожидаем 400/405, но не network unreachable.
+        with urllib.request.urlopen(req, data=b"noop", timeout=5) as resp:
+            out["checks"]["https_oauth2"] = f"ok: {resp.status}"
+    except Exception as e:
+        # тут норм может быть HTTPError 400 - это значит сеть есть
+        if getattr(e, "code", None) is not None:
+            out["checks"]["https_oauth2"] = f"ok-ish: HTTP {e.code}"
+        else:
+            out["ok"] = False
+            out["checks"]["https_oauth2"] = f"fail: {type(e).__name__}: {e}"
+
+    return out
 
 
 if __name__ == "__main__":
