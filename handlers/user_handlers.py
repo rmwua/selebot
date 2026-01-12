@@ -216,7 +216,8 @@ async def handle_all_categories(name_input: str, geo: str, message: types.Messag
             if req_id is not None:
                 lines.append("\nЗапрос по всем категориям отправлен модератору🟡")
 
-    kb = get_new_search_button(is_moderator=is_moderator(user_id), show_edit_button=show_edit_button, show_celebs=show_celebs)
+    is_mod = await is_moderator(user_id, subscribers_service)
+    kb = get_new_search_button(is_moderator=is_mod, show_edit_button=show_edit_button, show_celebs=show_celebs)
     kb.adjust(1)
     if not text:
         text = "\n".join(lines)
@@ -320,7 +321,8 @@ async def handle_request(name_input: str, category: str, geo: str, message: type
         show_celebs = True
         await state.update_data(geo=geo, cat=category)
 
-    kb = get_new_search_button(show_edit_button=True, is_moderator=is_moderator(user_id), show_celebs=show_celebs, similar=similar)
+    is_mod = await is_moderator(user_id, subscribers_service)
+    kb = get_new_search_button(show_edit_button=True, is_moderator=is_mod, show_celebs=show_celebs, similar=similar)
     kb.adjust(1)
 
     text = "\n".join(text)
@@ -475,7 +477,8 @@ async def similar_celebs_handler(call: types.CallbackQuery, state: FSMContext, r
             await state.update_data(geo=geo_l, cat=cat_l)
 
         user_id = call.from_user.id
-        kb = get_new_search_button(show_celebs=show_celebs, show_edit_button=True,is_moderator=is_moderator(user_id))
+        is_mod = await is_moderator(user_id, subscribers_service)
+        kb = get_new_search_button(show_celebs=show_celebs, show_edit_button=True,is_moderator=is_mod)
         kb.button(text="⬅️ Назад к списку", callback_data="similar:open")
         kb.adjust(1)
         return await call.message.edit_text(text, reply_markup=kb.as_markup())

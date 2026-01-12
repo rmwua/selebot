@@ -24,10 +24,11 @@ from utils import is_moderator, replace_param_in_text, parse_celebrity_from_msg,
 PENDING_MESSAGES = {}
 
 
-async def edit_handler(call: CallbackQuery, state: FSMContext):
+async def edit_handler(call: CallbackQuery, state: FSMContext, subscribers_service: SubscribersService):
     user_id = call.from_user.id
 
-    if not is_moderator(user_id):
+    is_mod = await is_moderator(user_id, subscribers_service)
+    if not is_mod:
         await call.answer("Недостаточно прав для редактирования", show_alert=True)
         return
 
@@ -51,7 +52,7 @@ async def edit_handler(call: CallbackQuery, state: FSMContext):
     await call.answer()
 
 
-async def field_chosen(call: CallbackQuery, state: FSMContext):
+async def field_chosen(call: CallbackQuery, state: FSMContext, subscribers_service: SubscribersService):
     await call.answer()
     field = call.data.split(":")[1]
     user_id = int(call.from_user.id)
@@ -65,7 +66,8 @@ async def field_chosen(call: CallbackQuery, state: FSMContext):
             pass
         await state.clear()
 
-        new_search_b = get_new_search_button(show_edit_button=True, is_moderator=is_moderator(user_id))
+        is_mod = await is_moderator(user_id, subscribers_service)
+        new_search_b = get_new_search_button(show_edit_button=True, is_moderator=is_mod)
         await call.bot.edit_message_reply_markup(
             message_id=orig_message_id,
             chat_id=call.message.chat.id,
@@ -340,7 +342,7 @@ async def send_request_to_moderator(name_input: str, category: str, geo: str, pr
             msg_ids.append({"chat_id": mod_id, "message_id": msg.message_id})
 
         except Exception as e:
-            logger.warning("Failed to send message to moderator", exc_info=e)
+            logger.warning("Failed to send message to moderator, ID: {mod_id}", exc_info=e)
 
     for ob_id in observers:
         try:

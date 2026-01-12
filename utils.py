@@ -8,8 +8,11 @@ import config
 from db.subscribers_service import SubscribersService
 
 
-def is_moderator(user_id: int) -> bool:
-    return user_id == config.ADMIN_ID
+async def is_moderator(user_id: int, subscribers_service: SubscribersService) -> bool:
+    if user_id == config.ADMIN_ID:
+        return True
+    role = await subscribers_service.get_user_role(user_id)
+    return (role or "").lower() == "admin"
 
 
 def replace_param_in_text(text: str, new_name:str=None, new_geo:str=None, new_status:str=None, new_cat:str=None, new_reason: str=None) -> str:
