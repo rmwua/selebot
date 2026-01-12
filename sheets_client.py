@@ -1,6 +1,8 @@
 import os
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
+from config import logger
+
 
 SPREADSHEET_ID = os.environ["SPREADSHEET_ID"]
 SHEET_NAME     = os.getenv("SHEET_NAME", "celebrities")
@@ -26,7 +28,17 @@ def _get_sheet_id():
             return props["sheetId"]
     raise ValueError(f"Sheet '{SHEET_NAME}' not found")
 
-_SHEET_ID = _get_sheet_id()
+
+def _ensure_sheet_id() -> int:
+    global _SHEET_ID
+    if _SHEET_ID is None:
+        logger.info(f"Getting sheet ID from spreadsheet: {SHEET_NAME}")
+        _SHEET_ID = _get_sheet_id()
+        logger.info(f"Got sheet ID: {_SHEET_ID}")
+    return _SHEET_ID
+
+
+_SHEET_ID = None
 
 
 def push_row(record: dict, sheet_row: int | None = None):
@@ -87,6 +99,8 @@ def push_row(record: dict, sheet_row: int | None = None):
 
 
 def push_rows(records: list[dict]):
+    sheet_id = _ensure_sheet_id()
+
     # читаем все ID из таблицы
     resp = _sheets.values().get(
         spreadsheetId=SPREADSHEET_ID,
@@ -129,7 +143,7 @@ def push_rows(records: list[dict]):
             # append в конец
             requests.append({
                 "appendCells": {
-                    "sheetId": _SHEET_ID,
+                    "sheetId": sheet_id,
                     "rows": [{
                         "values": [{"userEnteredValue": {"stringValue": str(v)}} for v in values]
                     }],
@@ -165,6 +179,7 @@ def delete_row_by_id(record_id: int):
     """
     Удаляет строку, где в столбце A лежит record_id, смещая все ниже вверх.
     """
+    sheet_id = _ensure_sheet_id()
     str_id = str(record_id)
     # читаем IDs со 2-й по 1000-ю строку
     resp     = _sheets.values().get(
@@ -187,7 +202,7 @@ def delete_row_by_id(record_id: int):
         "requests": [{
             "deleteDimension": {
                 "range": {
-                    "sheetId": _SHEET_ID,
+                    "sheetId": sheet_id,
                     "dimension": "ROWS",
                     "startIndex": sheet_row - 1,
                     "endIndex": sheet_row
