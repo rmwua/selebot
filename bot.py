@@ -15,7 +15,7 @@ from filters import AdminModObserverFilter
 from handlers.moderator_handlers import edit_handler, field_chosen, edit_back_button_handler, \
     new_param_chosen, delete_celebrity_handler, delete_request_handler, cmd_requests, cmd_users, cmd_role, \
     cancel_role_handler, cmd_role_receive_user_id, resume_role_changing_handler, role_chosen_handler, \
-    name_or_reason_edited, process_reason, handle_request_moderator, upload_confirmed, upload_cancelled
+    name_or_reason_edited, process_reason, handle_request_moderator, upload_confirmed, upload_cancelled, cmd_upload
 from handlers.user_handlers import (
     cmd_search, cmd_start,
     mode_chosen,
@@ -77,7 +77,9 @@ async def main():
     dp.message.register(lambda message: message.answer(f"❌ У вас нет прав для этой команды."),Command("requests"), ~admin_mod_observer_filter)
     dp.message.register(lambda message: message.answer(f"❌ У вас нет прав для этой команды."), Command("users"))
     dp.message.register(cmd_role, Command("role"), F.from_user.id == config.ADMIN_ID)
+    dp.message.register(cmd_upload, Command("upload"), F.from_user.id == config.ADMIN_ID)
     dp.message.register(lambda message: message.answer(f"❌ У вас нет прав для этой команды."), Command("role"))
+    dp.message.register(lambda message: message.answer(f"❌ У вас нет прав для этой команды."), Command("upload"))
 
     dp.callback_query.register(cancel_role_handler, F.data == "cancel_role_change")
     dp.callback_query.register(resume_role_changing_handler, F.data == "resume_role_changing")

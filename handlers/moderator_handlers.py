@@ -16,6 +16,7 @@ from keyboards import get_new_search_button, get_edit_keyboard, get_categories_k
     cancel_role_change_kb
 from models import USER_ROLES
 from sheets_client import push_row, delete_row_by_id
+from sheets_sync import export_postgres_to_sheets
 from states import EditCelebrity, EditUserRole, ModeratingStates, Upload
 from synonyms import geo_synonyms
 from utils import is_moderator, replace_param_in_text, parse_celebrity_from_msg, set_subscriber_username
@@ -673,15 +674,26 @@ async def cmd_upload(message: Message, state: FSMContext):
     await state.clear()
     await message.delete()
     kb = InlineKeyboardBuilder()
-    kb.button(text="Подтвердить", callback_data="confirm_upload")
-    kb.button(text="Отмена", callback_data="cancel_upload")
-    await message.answer("Эта команда обновит гугл таблицу и выгрузит в нее всё из базы данных бота.\n"
-                         "Подтверждаете выгрузку?")
+    kb.button(text="✅ Подтвердить", callback_data="confirm_upload")
+    kb.button(text="❌ Отмена", callback_data="cancel_upload")
+    await message.answer("Эта команда обновит гугл таблицу и заменит ее строками из базы данных бота.\n"
+                         "Подтверждаете выгрузку?", reply_markup=kb.as_markup())
 
-async def upload_confirmed(state: FSMContext):
-    pass
+async def upload_confirmed(call: CallbackQuery):
+    await call.answer()
+    await call.message.answer("Начинаю выгрузку....")
+    await call.message.delete()
+    try:
+        exported = export_postgres_to_sheets()
+        if exported is not None:
+            await call.message.answer(f"✅БД синхронизирована: {exported} строк.")
+            return
+    except Exception:
+        await call.message.answer("❌ Ошибка синхронизации данных.")
 
 
-async def upload_cancelled(state: FSMContext):
+async def upload_cancelled(call: CallbackQuery, state: FSMContext):
+    await call.answer()
+    await call.message.delete()
     await state.clear()
 

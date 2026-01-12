@@ -59,6 +59,7 @@ def export_postgres_to_sheets():
     ).execute()
 
     print(f"✅ Exported {len(rows)} rows (with id) to “{SHEET_NAME}” (A1:E).")
+    return len(rows)
 
 
 if __name__ == "__main__":
